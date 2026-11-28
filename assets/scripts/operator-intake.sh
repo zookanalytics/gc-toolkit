@@ -17,8 +17,8 @@
 # reaction already runs on the subject or an open conversation tracks it
 # (gctk reaction sling exit 3), a live workflow already drives it (exit 4), it
 # is already routed or armed, held, assigned, not open, or waits on a person's
-# answer (exit 5), or it is a feedback pattern, whose kind takes no first
-# reaction (exit 6), so the sling is a no-op that slings
+# answer (exit 5), or it is a standing record or a feedback pattern, whose kind
+# takes no first reaction (exit 6), so the sling is a no-op that slings
 # nothing: nothing would put the topic to the operator, so this does.
 # Exit: 0 conversation queued · 2 usage · 3 environment (the rig map did not
 # read, with rig-map.sh's reason, or the city has no rigs) · 4 runtime failure.
@@ -409,7 +409,7 @@ if [ -z "$NO_REACT" ]; then
     # the live-workflow no-op (a reaction never races work in flight), exit 5
     # the decided no-op (the subject is already routed or armed, held,
     # assigned, not open, or waits on a person's answer), and exit 6 the kind
-    # no-op (a feedback pattern takes no first reaction),
+    # no-op (a standing record or a feedback pattern takes no first reaction),
     # each distinct from a real failure to sling: name the actual cause so the
     # ask the converse session reads is accurate.
     if [ "$REACT_RC" -eq 3 ]; then
@@ -422,8 +422,8 @@ if [ -z "$NO_REACT" ]; then
         note "$PROG: subject $SUBJECT is already routed or armed, held, assigned, not open, or waits on a person's answer — no reaction was slung; filing the conversation directly"
         REACT_WHY="no: the subject is already routed or armed, held, assigned, not open, or waits on a person's answer (a first reaction never second-guesses a dispatch already decided)"
     elif [ "$REACT_RC" -eq 6 ]; then
-        note "$PROG: subject $SUBJECT is a feedback pattern, whose kind takes no first reaction — filing the conversation directly"
-        REACT_WHY="no: the subject is a feedback pattern, whose kind takes no first reaction"
+        note "$PROG: subject $SUBJECT is a standing record or a feedback pattern, whose kind takes no first reaction — filing the conversation directly"
+        REACT_WHY="no: the subject is a standing record or a feedback pattern, whose kind takes no first reaction"
     else
         note "$PROG: slinging the first reaction FAILED — falling back to filing the conversation directly"
         REACT_WHY="no: slinging the first reaction failed"

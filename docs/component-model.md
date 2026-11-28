@@ -67,8 +67,9 @@ Dropping these is as much the design as keeping the list above.
 
 A bead of one of the pack's own kinds names that kind in
 `metadata.task_kind`. Every reader that branches on such a kind reads that key
-and nothing else. `review`, `observation` and `feedback-pattern` are all
-resolved this way, in the gate scripts and the doctor checks. A feedback
+and nothing else. `review`, `triage-subject`, `observation` and
+`feedback-pattern` are all resolved this way, in the gate scripts and the
+doctor checks. A feedback
 pattern is backlog work the feedback distiller triages, which closes once
 resolved and reopens when its feedback recurs
 (`formulas/mol-feedback-distiller.toml`).
