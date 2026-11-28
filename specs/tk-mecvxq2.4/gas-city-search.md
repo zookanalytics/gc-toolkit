@@ -70,38 +70,44 @@ That reason does not hold for this city's stores. Measured on 2026-11-28:
   largest stores, so the live stores were not touched. It took this rig's store
   from 5.64 to 5.22 GB. That store holds 26,263 commits, and a full GC keeps the
   chunks of every one. It took the HQ store from 5.66 to 3.34 GB. That store
-  holds 1,630 commits, because Gas City's compactor flattened it on 2026-11-24,
-  and the full GC that follows a flatten has not run on it since. On a second
-  clone of this rig's store, Gas City's flatten followed by the full GC left
-  2.74 GB. The flatten is
-  `DOLT_RESET('--soft', <root commit>)` and then `DOLT_COMMIT('-Am', ...)`, as
-  `examples/bd/dolt/commands/compact/run.sh` runs it.
+  holds 1,630 commits, because Gas City's compactor flattened it at
+  2026-11-24T03:38Z, the date of its flatten commit, and the full GC that
+  follows a flatten has not run on it since. On a second clone of this rig's
+  store, Gas City's flatten followed by the full GC left 2.74 GB. The flatten
+  ran `DOLT_RESET('--soft', <root commit>)` and then `DOLT_COMMIT('-Am', ...)`.
+  That is the flatten `examples/bd/dolt/commands/compact/run.sh` runs on this
+  store, because it resets to the commit the store's `gc-compact-base` tag
+  names, and this store's tag names its root commit.
 
 So even the most Gas City's compaction does to these two stores leaves each over
 the 2 GB line, and the warning cannot clear while the stores keep what they
-keep. A store kept under the line would mean keeping less, such as cutting the
-stores' history, which is a design of its own. The operator accepted the warning
+keep. A store kept under the line would have to hold less than these stores
+hold now, which is a design of its own. The operator accepted the warning
 instead, in the ruling the entry names.
 
 The 20 GB line keeps its meaning here, and the entry hides it. Gas City's
 compaction runs no full GC on a store that sessions are connected to, a gate
-the upstream finding tk-z17uh59 records. The last full collection of the two
-largest stores ran on 2026-11-23. The daily reclaim's log shows the GC skipped
-on both for connected sessions at each pass from 2026-11-24 to 2026-11-27. In
-that time
-this rig's store grew from 3.28 GB, which the reclaim's log read at
+the upstream finding tk-z17uh59 records. Its compactor has run no full GC on
+either of the two largest stores since its pass at 2026-11-24T03:38Z. Each
+store's pending-GC marker, which the compactor clears only once that GC runs,
+has stood in every hourly doctor run since 04:11Z that day
+(`dolt-compact-state`). On 2026-11-28, `order-outcome-healthy` counted 45
+failed compactor passes in a row, the last of them skipping the GC on both
+stores for connected sessions. The daily reclaim's log shows the GC skipped on
+both the same way at each pass from 2026-11-24 to 2026-11-27. In that time this
+rig's store grew from 3.28 GB, which the reclaim's log read at
 2026-11-24T20:55Z, to 5.66 GB, about 0.7 GB a day. While the entry stands, the
 doctor still reports the collection it lacks: `order-outcome-healthy` lists the
 compactor's failed passes, and `dolt-compact-state` lists the full GCs owed.
 
 ## The fix at the source
 
-The operator gave the asks in the sitting that accepted the warning, on PR
-#1726 on 2026-11-28: "Noms I get, although I still think it's overly aggressive
-on the Gas City side without a good means to either adjust or to give more
-insight into where the 2GB is going." The sitting read the sentence as two asks,
-and the reading is the sitting's. Gas City gives a city a way to set the warning
-and error lines, and the check says where a store's size is going.
+In the sitting that accepted the warning, on PR #1726 on 2026-11-28, the
+operator said: "Noms I get, although I still think it's overly aggressive on
+the Gas City side without a good means to either adjust or to give more insight
+into where the 2GB is going." The sitting read the sentence as two asks, and the
+reading is the sitting's. Gas City gives a city a way to set the warning and
+error lines, and the check says where a store's size is going.
 
 The shape Gas City already uses for the worktree lines fits the first ask: two
 `[doctor]` keys, parsed the way `worktree_rig_warn_size` is and defaulting to 2
@@ -110,9 +116,11 @@ since that constructor already receives the city's config. For the second, the
 check's details give each store's chunk journal, newgen table files and
 `oldgen`. The two largest stores show why the split matters. At 09:13Z, `du
 -sk` read this rig's 5.67 GB as 5.61 GB of `oldgen` and a 0.06 GB journal.
-`oldgen` holds the chunks a collection kept, and the clone runs above show most
-of them are history that only a flatten drops. It read the HQ store's 5.62 GB as a 2.22 GB journal, 3.33 GB
-of newgen table files and 0.08 GB of `oldgen`. The check's message reports only
+`oldgen` holds the chunks a collection kept. By the clone runs above, about
+2.5 GB of them are history that only a flatten drops, because a full GC kept
+5.22 GB of the store and the flatten followed by a full GC left 2.74 GB. At the
+same time, `du -sk` read the HQ store's 5.62 GB as a 2.22 GB journal, 3.33 GB of
+newgen table files and 0.08 GB of `oldgen`. The check's message reports only
 the total. The fix is tens of lines and their tests.
 
 The upstream finding tk-qqyuqwz carries both asks, in the operator's list of
