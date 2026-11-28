@@ -1,6 +1,6 @@
 ---
 name: Gas City search for sending pool work only as a started run
-description: The Gas City primitives read for how the pack sends work to a pool, the reason Gas City gives for keeping a claim route off a started workflow, this city's count of the race between a bare claim and a run, and the Gas City gap the change leaves in place. Read it to review why gctk bead takeaway's --route now pours the pool's default formula.
+description: The Gas City primitives read for how the pack sends work to a pool, the reason Gas City gives for keeping a claim route off a started workflow, this city's count of the race between a bare claim and a run, the live run a route meets and this city's count of runs that overlapped on one bead, and the Gas City gap the change leaves in place. Read it to review why gctk bead takeaway's --route now pours the pool's default formula, and why it refuses a route the releasing session's own run would refuse.
 ---
 
 # Gas City search for sending pool work only as a started run
@@ -55,6 +55,50 @@ rig's store, last updated 2026-08-17 and 2026-08-19. No bead carries the
 claimant's note, and none carries both, which is what the stall leaves.
 The race is rare here, so the change removes the bare sends outside retiring
 code and adds nothing that detects or repairs the stall.
+
+## The live run a route meets
+
+- **Gas City's rule.** A sling that pours a formula is refused while a live
+  root of the same formula works the bead. `checkLegacySourceWorkflowConflict`
+  in `internal/sling/sling_core.go` returns `sourceworkflow.ConflictError`,
+  which `gc sling` exits 3 on, for each live root
+  `liveConvoyTrackedWorkflowRoots` (`internal/sling/sling_attachment.go`)
+  finds through the bead's own input convoy. A root of another formula is no
+  conflict. The reason Gas City gives is in that function's comment: "distinct
+  formulas targeting the same bead are legitimate concurrent work", and "Only
+  relaunching the SAME formula against the SAME bead while its prior root is
+  still live is the bug this guards". The plain sling keeps the refusal.
+  `slingDefaultFormula` falls back to a raw route only when a molecule or wisp
+  that is no workflow is attached to the bead, and the comment above
+  `attachFormulaToBead` says "a live graph.v2 workflow conflict" "keeps
+  hard-failing". Nothing in either check exempts a root the slinging session
+  holds.
+- **How the release meets it.** `gctk bead takeaway --release` ends each live
+  run on the bead except one this session holds a step of, which closes its own
+  chain, and only then slings the route. A session holding a step of a run of
+  the formula the route pours would land the release and then meet exit 3,
+  leaving the bead released and sent nowhere. So the takeaway refuses that
+  route before it writes anything. A run of another formula takes the route's
+  run beside it. The pack's one release with a route from inside a run on the
+  bead is the first reaction's dispose, whose run is mol-first-reaction, while
+  the polecat pools pour mol-polecat-work.
+- **This city's measurement.** On 2026-11-28 at 00:22Z I ran one `gc bd sql`
+  per store over all seven of the city's stores. It joined every root with
+  `gc.kind=workflow` to the one bead its input convoy tracks, with the root's
+  `gc.formula_name` and its created and closed times, and counted the pairs of
+  roots on one bead whose lifetimes overlapped. Eleven pairs ran one formula at
+  once: six in gc-toolkit's store and five in the other rigs' stores, nine of
+  them mol-polecat-work and two with no formula name. The newest of them started
+  on 2026-09-28, and none has since. Twenty-six pairs ran two formulas at once:
+  mol-first-reaction beside mol-polecat-work 14 times, the newest on
+  2026-10-10, mol-first-reaction beside mol-validate-close 11 times, the newest
+  on 2026-11-28, and mol-polecat-work beside mol-validate-close once. No bead
+  held two live roots when it ran. So Gas City's rule holds here, and a run of
+  another formula beside the first reaction's own run is the shape this city
+  already runs.
+- **No fix at the source.** The rule is not a fault, and its reason holds here:
+  two live runs of one formula on a bead start two workers on one branch, which
+  the work skill's "One dispatch, never two" forbids as well.
 
 ## The gap left in place
 

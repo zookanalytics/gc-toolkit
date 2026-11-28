@@ -105,15 +105,19 @@ func TestRunsThatDoNotReadEndNothing(t *testing.T) {
 	}
 }
 
-// A run whose live member this session holds is its own, such as a sitting
-// disposing the bead it runs on, and closes its own chain: the release writes
+// A run whose live member this session holds is its own, such as the first
+// reaction a dispose runs from, and closes its own chain: the release writes
 // none of its beads and cancels nothing of it, and the release itself still
-// lands whole (OWNRUN, LIVESTEP).
+// lands whole, with the pool's run of another formula slung beside it (OWNRUN,
+// LIVESTEP).
 func TestAReleaseLeavesThisSessionsOwnRun(t *testing.T) {
 	w := newWorld(t)
-	w.tk.Self = []string{"polecat-me", "s-me"}
+	w.tk.Self = []string{"proactive-me", "s-me"}
+	root := w.row("tk-root")
+	root.Title, root.Metadata["gc.formula_name"] = "mol-first-reaction", "mol-first-reaction"
+	w.put(root)
 	w.put(fake.Bead{ID: "tk-root-step", Status: "in_progress", Assignee: "s-me",
-		Metadata: map[string]string{"gc.root_bead_id": "tk-root", "gc.step_ref": "mol-polecat-work.submit"}})
+		Metadata: map[string]string{"gc.root_bead_id": "tk-root", "gc.step_ref": "mol-first-reaction.react"}})
 	if code, _, err := w.take(Request{Bead: "tk-a", Text: "released to the pool", Release: true, Route: pool}); code != 0 {
 		t.Fatalf("a release beside this session's own run exits %d (%v)", code, err)
 	}
@@ -131,6 +135,28 @@ func TestAReleaseLeavesThisSessionsOwnRun(t *testing.T) {
 	}
 	if got := w.lines("SLING "); len(got) != 1 {
 		t.Errorf("(LIVESTEP) the bead was not routed: %q", got)
+	}
+}
+
+// A route that pours the formula of a run this session holds on the bead is
+// refused with nothing written. The release would leave that run to close its
+// own chain, and Gas City starts no second live run of a formula on a bead, so
+// the route's sling would leave the bead released and sent nowhere (OWNFORMULA).
+func TestARouteOntoThisSessionsOwnRunsFormulaIsRefused(t *testing.T) {
+	w := newWorld(t)
+	w.tk.Self = []string{"polecat-me", "s-me"}
+	w.put(fake.Bead{ID: "tk-root-step", Status: "in_progress", Assignee: "s-me",
+		Metadata: map[string]string{"gc.root_bead_id": "tk-root", "gc.step_ref": "mol-polecat-work.submit"}})
+	code, _, err := w.take(Request{Bead: "tk-a", Text: "released to the pool", Release: true, Route: pool})
+	if code != 2 {
+		t.Fatalf("(OWNFORMULA) a route onto this session's own run's formula exits %d (%v), want 2", code, err)
+	}
+	has(t, err.Error(), "this session holds a step of run tk-root, which already runs mol-polecat-work on tk-a", "(OWNFORMULA) the refusal")
+	if len(w.log) != 0 {
+		t.Errorf("(OWNFORMULA) the refusal wrote %q", w.log)
+	}
+	if b := w.row("tk-a"); b.Status != "open" || b.Metadata["gc.takeaway"] != "" {
+		t.Errorf("(OWNFORMULA) the bead reads %s with headline %q, want it untouched", b.Status, b.Metadata["gc.takeaway"])
 	}
 }
 
