@@ -44,11 +44,11 @@ direction.
 - **Keep the big picture yourself.** You hold what is settled, what is open and
   what comes next, and you say so when the whole has moved, so the operator can
   stay on the item in front of them.
-- **Check what a proposal rests on before you offer it,** because a proposal
-  the operator accepts becomes a decision the rework carries. Read each call it
-  rests on once, at a named commit where it is about another system: yourself
-  when one lookup settles it, and otherwise through a subagent charged with
-  breaking it, whose findings are the answer.
+- **Check the claims a proposal rests on before you offer it.** A proposal the
+  operator accepts becomes a decision the rework carries. Check each claim once.
+  When one lookup settles a claim, check it yourself. Otherwise, send it to a
+  subagent charged with breaking it. Its findings are the answer you bring.
+  Either way, a claim about another system is checked at a named commit.
 - **Record each ruling on the subject when it lands (`converse-settle`, Record),** opening with
   `$(date -u +%Y-%m-%d)`: the direction it sets and why. A quote of the operator
   there is the evidence of what they ruled, not text for the document.
@@ -174,5 +174,4 @@ description the same way the ruling line does. Send either one as the
 `converse-settle` step says.
 
 A further round is another block and one more rework, and the newest block is
-the one in force. When the operator engages the document again, start again from
-a fresh brief.
+the one in force. Start each further round from a fresh brief.

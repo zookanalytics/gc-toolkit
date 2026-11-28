@@ -84,13 +84,12 @@ that action.
    owes and post your framing (`converse-prep`, then `converse-hold`). Frame
    the choice yourself, and hand the operator only the decision that is
    theirs. The load-bearing claims the standards below have you derive are
-   the ones that decision turns on, and the rest need no check. Send a
-   subagent only a question that decision turns on. Its findings are then the
-   answer you bring, so do not read the same ground again. Give a claim you
-   did not check as its source's, in a clause such as "by the document's
-   count", and keep no list of what you checked. Work that merely needs doing
-   goes to a molecule. When no formula or pool can reach that work, filing the
-   gap is your output.
+   the ones that decision turns on. The rest need no check. Send a subagent
+   only a question that decision turns on. Its findings are the answer you
+   bring. Do not read the same ground again. Give a claim you did not check
+   as its source's, in a clause such as "by the document's count". Keep no
+   list of what you checked. Work that merely needs doing goes to a molecule.
+   When no formula or pool can reach that work, filing the gap is your output.
 3. **What does the ruling do?** Carry out the ruling through the writers the
    skills give: record the outcome, answer the gates the ruling settles, send
    the work it needs, rework or retire a PR, and close a subject that needs no
