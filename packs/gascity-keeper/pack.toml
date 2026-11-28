@@ -21,8 +21,8 @@ name = "gascity-keeper"
 schema = 2
 
 # The sub-pack ships the keeper, its `mol-upstream-gc-*` formulas, and
-# the gascity-rig-specific fragments (rebase-conventions,
-# polecat-patterns). It does NOT carry `[[patches.agent]]` blocks:
+# the gascity-rig-specific fragment rebase-conventions. It does NOT
+# carry `[[patches.agent]]` blocks:
 # sub-pack patches can only target agents the sub-pack itself imports,
 # and importing gastown here would duplicate gastown's agents under the
 # `gascity-keeper` binding (so the gc-toolkit-patched polecat gets
@@ -58,7 +58,7 @@ schema = 2
 #
 #   [[rigs.patches]]
 #   agent = "polecat"
-#   inject_fragments_append = ["rebase-conventions", "polecat-patterns"]
+#   inject_fragments_append = ["rebase-conventions"]
 #
 # `rebase-conventions` is the polecat-facing doctrine (classification,
 # check loop, conflict policy, resume, and how a finished rebase lands).
