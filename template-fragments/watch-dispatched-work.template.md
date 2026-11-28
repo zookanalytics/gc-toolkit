@@ -36,8 +36,8 @@ sending work.
 
 The default after `gc sling` is file-and-forget: the bead is the contract, and
 nothing here reads it again. A follow-up that is BLOCKED on another bead takes an
-edge, and an arm when the work skill's intake rule lets it start by itself, never
-a watcher (the `waits` skill):
+edge (the `waits` skill). It takes an arm as well when the work skill's intake
+rule lets you send it now:
 
 ```
 # >>> gctk-bin
@@ -47,8 +47,8 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
     --target <rig>/<agent> --reason "waits for <blocker>"
 ```
 
-A watch held in your context is a dispatch invisible to everyone else and gone
-when the session ends.
+A blocked follow-up never takes a watcher. A watch held in your context is a
+dispatch invisible to everyone else and gone when the session ends.
 
 The one sanctioned watch: a human is in THIS conversation right now, waiting on
 the outcome. Then spawn exactly one bounded terminal-status watch — it reports
