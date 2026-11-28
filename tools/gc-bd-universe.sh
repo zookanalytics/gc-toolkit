@@ -14,9 +14,13 @@
 # Tunables: GC_BD_UNIVERSE_TOKEN_CEILING (footprint gate, default 2000),
 # GC_BD_UNIVERSE_NOTES_TAIL_LINES (default 12), GC_BD_UNIVERSE_FIXTURE
 # (test hook: canned <id>.show/children/pr/checks files instead of gc/gh).
+# The text people posted on a PR is read through gctk github quote alone, the
+# pack's one reader of it, which GCTK_BIN names in a test.
 set -euo pipefail
 
 PROG="${0##*/}"
+# shellcheck source=../assets/scripts/gctk-resolve.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/gctk-resolve.sh"
 
 TOKEN_CEILING="${GC_BD_UNIVERSE_TOKEN_CEILING:-2000}"
 NOTES_TAIL_LINES="${GC_BD_UNIVERSE_NOTES_TAIL_LINES:-12}"
@@ -72,9 +76,11 @@ Fetchable tiers ('$PROG fetch <bead-id> <tier>'):
   notes                    Full notes log (the fed core carries only the tail).
   comments                 Full comment history.
   parent                   The parent's full fields.
-  pr [--json]              PR title/body/diff (gh pr view).
-  conversation [--json]    What has been SAID on the PR: issue comments, review
-                           bodies, inline review comments. --json emits a state
+  pr [--json]              PR title/body (gctk github quote --description)
+                           and diff (gh pr diff).
+  conversation [--json]    What has been SAID on the PR (gctk github quote):
+                           issue comments, review bodies, inline review
+                           comments, an outside account's held. --json emits a state
                            enum: prework|no_conversation|present, plus counts
                            and the PR's updated_at.
   ci [--json]              CI status (gh pr checks). --json emits a state enum:
@@ -313,8 +319,9 @@ fetch_parent() {
 }
 
 # fetch_pr — PR text/diff. prework -> exit 0 with a clear marker (not error).
+# The title and the body are the quote's (pr_quote), and the diff is gh's.
 fetch_pr() {
-    local id="$1" json="${2:-}" bead prnum out
+    local id="$1" json="${2:-}" bead prnum view url quote diff
     bead="$(acquire_bead "$id")"
     prnum="$(pr_ref "$bead")"
     if [ -z "$prnum" ]; then
@@ -327,25 +334,61 @@ fetch_pr() {
     fi
     # PR text is reached, externally-sourced content -> tag it (json field /
     # human fence). Pre-work above is internal status, not tagged.
-    if [ -n "$FIXTURE" ]; then
-        [ -f "$FIXTURE/$id.pr.json" ] || die_unreachable "fetch pr: $prnum referenced but unreachable (no fixture data)"
-        if [ "$json" = "--json" ]; then
-            json_provenance "PR #$prnum" < "$FIXTURE/$id.pr.json"
-        else
-            jq -r '"#\(.number) \(.title)\n\nstate: \(.state)\n\n\(.body // "")"' "$FIXTURE/$id.pr.json" \
-                | fence_untrusted "GitHub PR #$prnum"
-        fi
+    view="$(pr_view "$id" "$bead" "$prnum")" \
+        || die_unreachable "fetch pr: #$prnum referenced but unreachable (gh failed)"
+    url="$(printf '%s' "$view" | jq -r '.url // ""')"
+    if [ "$json" = "--json" ]; then
+        quote="$(pr_quote "$url" --description --json)" \
+            || die_unreachable "fetch pr: #$prnum text unreachable (gctk github quote failed)"
+        printf '%s\n%s\n' "$view" "$quote" | jq -s '.[0] as $v | .[1] as $q
+            | (($q.posts // []) | map(select(.kind == "description")) | first // {}) as $d
+            | {number: $v.number, url: $v.url, state: $v.state,
+               title: ($q.title // ""), title_held: ($q.title_held // false),
+               body: ($d.text // ""), body_held: ($d.held // false)}' \
+            | json_provenance "PR #$prnum"
         return 0
     fi
-    if [ "$json" = "--json" ]; then
-        out="$(gh pr view "$prnum" --json number,title,state,body 2>/dev/null)" \
-            || die_unreachable "fetch pr: #$prnum referenced but unreachable (gh failed)"
-        printf '%s' "$out" | json_provenance "PR #$prnum"
+    quote="$(pr_quote "$url" --description)" \
+        || die_unreachable "fetch pr: #$prnum text unreachable (gctk github quote failed)"
+    if [ -n "$FIXTURE" ]; then
+        diff="$(cat "$FIXTURE/$id.diff" 2>/dev/null || true)"
     else
-        out="$({ gh pr view "$prnum" 2>/dev/null && gh pr diff "$prnum" 2>/dev/null; })" \
-            || die_unreachable "fetch pr: #$prnum referenced but unreachable (gh failed)"
-        printf '%s\n' "$out" | fence_untrusted "GitHub PR #$prnum"
+        diff="$(gh pr diff "$url" 2>/dev/null)" \
+            || die_unreachable "fetch pr: #$prnum diff unreachable (gh failed)"
     fi
+    { printf '%s\n' "$view" | jq -r '"PR #\(.number) · \(.state) · \(.url)"'
+      printf '%s\n%s\n' "$quote" "$diff"; } | fence_untrusted "GitHub PR #$prnum"
+}
+
+# pr_view <id> <bead-json> <prnum> — the PR's number, URL, state and update
+# time, which carry no text anyone posted, from gh pr view, pinned to the
+# repository of the bead's pr_url when it records one, or under the fixture
+# hook from <id>.pr.json.
+pr_view() {
+    local id="$1" bead="$2" prnum="$3" slug
+    if [ -n "$FIXTURE" ]; then
+        [ -f "$FIXTURE/$id.pr.json" ] || return 1
+        jq -c '{number, url, state, updatedAt}' "$FIXTURE/$id.pr.json"
+        return 0
+    fi
+    slug="$(pr_repo "$bead")"
+    if [ -n "$slug" ]; then
+        gh pr view "$prnum" --repo "$slug" --json number,url,state,updatedAt 2>/dev/null
+    else
+        gh pr view "$prnum" --json number,url,state,updatedAt 2>/dev/null
+    fi
+}
+
+# pr_quote <url> [flag...] — the text people posted on the PR at url, through
+# gctk github quote, which says how it quotes each post and which posts it
+# holds for the operator (gctk github quote --help). A quote that printed and
+# then failed to file a held post's follow-up is still the quote, and gctk's
+# stderr says what did not file.
+pr_quote() {
+    local gctk out
+    gctk="$(gctk_path)" || return 1
+    out="$("$gctk" github quote "$@")" || [ -n "$out" ] || return 1
+    printf '%s\n' "$out"
 }
 
 # pr_repo <bead-json> -> "owner/repo" parsed from metadata.pr_url, or empty.
@@ -374,7 +417,7 @@ pr_repo() {
 # reachable through this tier alone, and `updated_at` is the only field on the
 # state side that moves when they land.
 fetch_conversation() {
-    local id="$1" json="${2:-}" bead prnum slug repo_flag view inline combined
+    local id="$1" json="${2:-}" bead prnum view quote combined
     bead="$(acquire_bead "$id")"
     prnum="$(pr_ref "$bead")"
     if [ -z "$prnum" ]; then
@@ -386,49 +429,28 @@ fetch_conversation() {
         return 0
     fi
 
-    if [ -n "$FIXTURE" ]; then
-        [ -f "$FIXTURE/$id.conversation.json" ] \
-            || die_unreachable "fetch conversation: $prnum referenced but unreachable (no fixture data)"
-        view="$(jq '{number, url, state, updatedAt, comments, reviews}' "$FIXTURE/$id.conversation.json")"
-        inline="$(jq '.review_comments // []' "$FIXTURE/$id.conversation.json")"
-    else
-        slug="$(pr_repo "$bead")"
-        if [ -n "$slug" ]; then
-            repo_flag="$slug"
-            view="$(gh pr view "$prnum" --repo "$slug" --json number,url,state,updatedAt,comments,reviews 2>/dev/null)" || view=""
-        else
-            repo_flag="{owner}/{repo}"
-            view="$(gh pr view "$prnum" --json number,url,state,updatedAt,comments,reviews 2>/dev/null)" || view=""
-        fi
-        [ -n "$view" ] || die_unreachable "fetch conversation: #$prnum referenced but unreachable (gh failed)"
-        # `gh --paginate` emits one JSON ARRAY PER PAGE, so a plain `.[]?` over
-        # the stream reads page one and silently drops the rest; slurp with -s
-        # and flatten. Failing to reach the inline comments is an error, never
-        # an empty list — a silent zero here is the blindness this tier exists
-        # to end.
-        inline="$(gh api "repos/$repo_flag/pulls/$prnum/comments?per_page=100" --paginate 2>/dev/null | jq -s '[.[][]?]')" \
-            || die_unreachable "fetch conversation: #$prnum inline review comments unreachable (gh api failed)"
-    fi
+    view="$(pr_view "$id" "$bead" "$prnum")" \
+        || die_unreachable "fetch conversation: #$prnum referenced but unreachable (gh failed)"
+    # Every post comes from the one quote, held ones among them. Failing to
+    # reach it is an error, never an empty list — a silent zero here is the
+    # blindness this tier exists to end.
+    quote="$(pr_quote "$(printf '%s' "$view" | jq -r '.url // ""')" --json)" \
+        || die_unreachable "fetch conversation: #$prnum unreachable (gctk github quote failed)"
 
-    # Both documents go in on stdin: the raw inline-comment objects carry
-    # diff hunks and link blocks, and a busy PR's array overruns the kernel's
+    # Both documents go in on stdin: a busy PR's quote overruns the kernel's
     # single-argument limit if passed as --argjson.
-    combined="$(printf '%s\n%s\n' "$view" "$inline" | jq -s '
-        .[0] as $view | (.[1] // []) as $inline
-        | $view
-        | ((.comments // []) | map({author: (.author.login // .author.name // "?"),
-                                    created_at: (.createdAt // null),
-                                    body: (.body // "")})) as $ic
-        | ((.reviews // []) | map({author: (.author.login // .author.name // "?"),
-                                   state: (.state // ""),
-                                   submitted_at: (.submittedAt // null),
-                                   body: (.body // "")})) as $rv
-        | ($inline | map({author: (.user.login // "?"),
-                          created_at: (.created_at // null),
-                          path: (.path // ""),
-                          line: (.line // .original_line),
-                          body: (.body // "")})) as $rc
+    combined="$(printf '%s\n%s\n' "$view" "$quote" | jq -s '
+        .[0] as $view | (.[1].posts // []) as $posts
+        | def who: if .held then "an outside account" else (.author.login // "?") end;
+          def said: if .held then "(held for the operator, who has a follow-up for it)" else (.text // "") end;
+        ($posts | map(select(.kind == "conversation") | {author: who, held: (.held // false),
+                                    created_at: (.at // null), body: said})) as $ic
+        | ($posts | map(select(.kind == "review") | {author: who, held: (.held // false),
+                                   state: (.state // ""), submitted_at: (.at // null), body: said})) as $rv
+        | ($posts | map(select(.kind == "inline") | {author: who, held: (.held // false),
+                          created_at: (.at // null), path: (.path // ""), line: (.line // null), body: said})) as $rc
         | (($ic | length) + ($rv | length) + ($rc | length)) as $total
+        | $view
         | {
             state: (if $total == 0 then "no_conversation" else "present" end),
             number: .number,
@@ -449,6 +471,7 @@ fetch_conversation() {
             "PR #\(.number) \(.pr_state) · updated \(.updated_at // "?")",
             "conversation: \(.counts.total) (issue \(.counts.issue_comments) · reviews \(.counts.reviews) · inline \(.counts.review_comments))",
             (.url // ""),
+            "Each post is quoted as gctk github quote quotes it (gctk github quote --help).",
             "",
             (if (.issue_comments | length) == 0 then "ISSUE COMMENTS: (none)" else "ISSUE COMMENTS:" end),
             (.issue_comments[] | "  \(.author) · \(.created_at // "?")\n\(.body)\n"),
