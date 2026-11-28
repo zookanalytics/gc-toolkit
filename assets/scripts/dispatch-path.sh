@@ -22,12 +22,9 @@
 # work that has none, and check-step-terminal, which counts a step as offerable
 # only when it has one.
 # The readers that leave a held bead alone source it too:
-# check-blocked-work-armed, which owes one no arm; check-po-queue-only, which
-# reads a bead routed or assigned to the po as reaching it only when no hold
-# holds it, since a held bead reaches no seat; and the liveness classifier
-# (liveness-classify.sh, which liveness-sweep.sh and its precheck compose) and
-# the re-check a liveness gate's message carries (liveness-recheck.sh), which
-# name the hold as a wait.
+# check-blocked-work-armed, which owes one no arm, and check-po-queue-only,
+# which reads a bead routed or assigned to the po as reaching it only when no
+# hold holds it, since a held bead reaches no seat.
 # The deferred-dispatch order's start (gctk bead start-armed) reads no row here:
 # it selects armed beads by Gas City's own serve rule and holds one carrying a
 # hold label in any case, as Gas City's hook does, and check-armed-dispatch-owed
@@ -41,8 +38,8 @@
 # of them at once, and dispatch-path.test.sh fails when a reader stops sourcing
 # this file or tests the keys or the labels itself.
 #
-# Usage follows the in-variable jq convention (standing-kinds.sh): prepend the
-# defs to a jq program, e.g.
+# Usage follows the in-variable jq convention: prepend the defs to a jq program,
+# e.g.
 #   jq "$DISPATCH_PATH_JQ"' map(select((has_dispatch_path or has_dispatch_hold) | not)) '
 # A program built in a double-quoted string expands the variable in place.
 # shellcheck disable=SC2034  # read by the scripts that source this file

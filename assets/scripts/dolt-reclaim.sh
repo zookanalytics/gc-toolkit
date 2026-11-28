@@ -165,11 +165,11 @@ fi
 # A reclaim is a full GC; refuse to pile one onto a data plane that is already
 # unreachable or overloaded. dolt_degraded prints a one-line reason and returns
 # 0 when degraded, 1 when healthy, and 2 when the probe proved neither. The
-# verdict reads server.reachable and server.latency_ms, the fields and 5000ms
-# ceiling the deacon patrol's dolt-health step reads. The report's wall time is
-# not a Dolt signal. `gc dolt health` caps each Dolt call it makes, so a server
-# that cannot answer the ping inside its cap reads as unreachable, while the
-# time the whole report takes follows host load and the gc calls it makes.
+# verdict reads server.reachable and server.latency_ms, with a 5000ms ceiling.
+# The report's wall time is not a Dolt signal. `gc dolt health` caps each Dolt
+# call it makes, so a server that cannot answer the ping inside its cap reads as
+# unreachable, while the time the whole report takes follows host load and the
+# gc calls it makes.
 #
 # The bound is a hang guard. It is long enough for the report on a server the
 # probe cannot reach. That report skips the per-database counts, so it spends

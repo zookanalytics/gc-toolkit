@@ -251,7 +251,7 @@ Sign off by the case that fits (the converse-settle step):
 
 ## Send a bead to a named agent
 
-The mechanik, deacon, witness, refinery and keeper are named agents. Address
+The mechanik, witness, refinery and keeper are named agents. Address
 one by the qualified name `gc agent list` prints, in the form it finds its work
 by (`docs/deferred-dispatch.md`). A bead is ready when bd reports it so, which
 this answers:
@@ -281,12 +281,11 @@ this answers:
   agent when its blocker closes. The refinery takes an integration effort's
   landing bead and its bring-current hand-off, which `integration-effort.md`
   files.
-- **The deacon and the witness patrol**, and each one's hook offers only its
-  patrol's own wisp, so neither takes a bead. Send what one of them must act
-  on as mail, which its patrol reads every cycle:
+- **The witness** takes no bead. Send what it must act on as mail, with
+  `--notify`:
 
   ```bash
-  gc mail send <qualified-name> -s "<what it must do>" -m "<the bead, and what to do about it>"
+  gc mail send <qualified-name> --notify -s "<what it must do>" -m "<the bead, and what to do about it>"
   ```
 
 ## Stand up an integration effort
@@ -397,7 +396,7 @@ GCTK_SCRIPTS_DIR="$(gc <binding> scripts-dir)" "$GCTK" bead takeaway <bead> "<wh
   goes now, and why. For the refinery or the keeper, pass
   `--assign <named-agent>` in place of `--route <rig>/<pool>`, which writes the
   assignee in the release, then nudge it once the bead is ready, as Send a bead
-  to a named agent says. For the mechanik, the deacon or the witness, release
+  to a named agent says. For the mechanik or the witness, release
   the bead with neither and send it as that section says.
 - **Withdraw a recommendation** the bead should not take, keeping the bead open
   for discussion:

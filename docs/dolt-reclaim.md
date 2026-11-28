@@ -23,8 +23,8 @@ bound a pass, and how an operator runs it.
 
 **Boundaries.** The flatten that rewrites a store's commit history stays an
 operator action and is not covered here. The scheduled commit-count
-compaction, the `gc dolt` commands, and the `dolt-noms-size` doctor check are
-gascity's, and flagging commit bloat is the deacon patrol's. Disk outside the
+compaction, the `gc dolt` commands, and the `dolt-noms-size` doctor check,
+which warns on a store's size, are gascity's. Disk outside the
 bead stores is reclaimed by [scratch-reclaim.md](scratch-reclaim.md) and
 [worktree-reclaim.md](worktree-reclaim.md).
 
@@ -55,8 +55,7 @@ the deployed `gc dolt compact` has no `--gc-only` flag, the pass refuses and
 exits rather than fall back to the flatten.
 
 A reclaim never starts while the data plane is unreachable or overloaded,
-judged off the same `server.reachable` and 5000ms latency the deacon patrol's
-Dolt-health step reads. A full GC is heavy, and piling one onto a server that
+judged off `server.reachable` and a 5000ms latency ceiling. A full GC is heavy, and piling one onto a server that
 is already struggling is the amplifier this brake removes. The gate runs before
 the pass and again before each store, because a full GC can slow the server it
 just ran on.
@@ -115,8 +114,7 @@ a bare flatten is never issued.
 
 ## What it does not touch
 
-The flatten path stays an operator action, and commit bloat is the deacon
-patrol's to flag on its own key. A store under the line is left alone. The
+The flatten path stays an operator action. A store under the line is left alone. The
 `dolt-noms-size` doctor check is defined in the gascity binary and is not
 changed here; this pass is the automatic remedy for the size it warns about,
 not a replacement for the warning.

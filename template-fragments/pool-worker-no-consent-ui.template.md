@@ -14,7 +14,7 @@ terminal step, never at a prompt.
 **What to do instead — none of these block, and each leaves a durable record a
 pending prompt does not:**
 - **A requirement is unclear, or another agent could answer:** mail the witness
-  (`HELP:`), per Blocked work and human gates.
+  (`HELP:`, with `--notify`), per Blocked work and human gates.
 - **A decision only the operator can make, or work you must decline and cannot
   close:** file the human gate with `human-gate.sh`, record the wait on the
   work bead, then cancel your run and drain, per Blocked work and human gates.

@@ -44,7 +44,7 @@ reading a pull request is [pull-request-states.md](pull-request-states.md).
 No transition here is performed by a repair pass. Writers complete their own
 transitions in one atomic write; the only reactive edges respond to facts the
 pack does not write — GitHub closing or retargeting a PR (the landing order),
-a session dying (witness orphan recovery).
+a session dying (Gas City's release of its claim).
 
 ```mermaid
 stateDiagram-v2
@@ -54,7 +54,7 @@ stateDiagram-v2
     [*] --> filed
     filed --> routed: gc sling / gctk bead start-armed
     routed --> claimed: gc hook --claim (runtime)
-    claimed --> routed: witness patrol — dead session
+    claimed --> routed: Gas City's release — dead session
     state "poured (gc.execution_routed_to)" as poured
   }
 
@@ -120,7 +120,7 @@ same way until its hand-off to the refinery removes the edge
 |---|---|---|
 | filed → routed | `gc sling` (runtime); the deferred-dispatch order's `gctk bead start-armed`, for a bead `gctk bead arm` armed, when blockers must close first | dispatch |
 | routed → claimed | `gc hook --claim` (runtime) | pool demand spawns a session |
-| claimed → routed | witness patrol (`mol-witness-patrol`) | session died with the claim held |
+| claimed → routed | Gas City's release: the controller's, and core's orphan sweep (`gc bd release-if-current`) (runtime) | session died with the claim held |
 | claimed → handed_off | `mol-polecat-work` submit step (ONE atomic `gc bd update`) | push verified on the remote |
 | handed_off → merged | `direct-merge-push.sh`, which the refinery's merge-push step runs for the `direct` strategy, via `lifecycle.sh` | FF merge pushed and verified on the target, or found there by a later patrol through the bead's `direct_landing_sha` stamp; record + close in one call |
 | handed_off → pull_request_pending | `refinery-publish.sh`, the refinery's merge-push step for the `mr` strategy, through `gctk pr record` | the PR is published at the prepared head ([The pending record](#the-pending-record)) |
@@ -410,9 +410,8 @@ check_set may carry, but it is a universal merge rule, not a check (below). The
 one resolver, `gctk review checks --resolve <cs> --through <phase> --at <oid>`,
 reads the check index at the commit the reader judges, drops all three and
 returns the checks whose phase gates `<phase>`, so no reader of a stage
-transition re-derives that drop: `gate-ensure.sh`, `review-outcome.sh` and
-`liveness-sweep.sh` all ask it rather than tokenizing
-`check_set` themselves.
+transition re-derives that drop: `gate-ensure.sh` and `review-outcome.sh` both
+ask it rather than tokenizing `check_set` themselves.
 `bring-current-guard.sh` judges no transition and asks no phase, and it reads
 `check_set`'s names itself three times. When it records a conflicted round, it
 rules on the round itself for a set of `none` or `off`, and it adds `triage` to
@@ -852,8 +851,9 @@ up dating a state that no longer holds, with nothing in either key saying so.
 
 The one boundary crossing between the work and merge workflows is a single
 atomic write. There is nothing to reconstruct afterward: a session that dies
-before the write leaves a claimed bead the witness patrol re-routes; one that
-dies after it leaves a complete handoff the refinery picks up.
+before the write leaves a claimed bead that Gas City's release puts back in its
+pool, and one that dies after it leaves a complete handoff the refinery picks
+up.
 
 ```mermaid
 sequenceDiagram

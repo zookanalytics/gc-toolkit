@@ -34,7 +34,7 @@ usage: resolve-route.sh <name>
 
 Prints the live agent identity <name> resolves to. Accepts the identity
 itself, the rig-unqualified form of one (`<binding>.polecat`), a form carrying
-a qualifier the identity does not (`<rig>/<binding>.deacon`), or a bare role
+a qualifier the identity does not (`<rig>/<binding>.mechanik`), or a bare role
 (`refinery`), whose binding, the key the city imports the pack under, the
 roster supplies.
 

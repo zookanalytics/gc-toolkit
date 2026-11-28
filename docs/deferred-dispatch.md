@@ -173,10 +173,8 @@ record for it. The work skill gives each agent's command.
   assignee.** The refinery's patrol lists the open beads assigned to it that
   carry a `branch`, and the keeper's wake sweep lists the beads assigned to it
   that carry a handback. A route never reaches either list.
-- **The deacon and the witness patrol their own wisps.** Each one's hook
-  answers its patrol's wisp ahead of a bead routed or assigned to it, and
-  neither patrol lists assigned beads, so they take mail, which each patrol
-  reads every cycle.
+- **The witness takes mail.** It runs only for its mail, and `--notify` wakes
+  it.
 
 A route or an assignee alone gives a running agent no turn. Core's
 `nudge-on-route` order would nudge a routed agent, but it reads the route from
@@ -201,8 +199,8 @@ is not a `blocks` edge, and hears at its next turn. Nothing nudges on a raw
 the work skill's send.
 
 `gctk reaction dispose` hands a bead to the mechanik as a route and to the
-refinery as the assignee, and refuses the deacon, the witness, the keeper and
-any agent this section does not name before it writes anything. Once the bead
+refinery as the assignee, and refuses the witness, the keeper and any agent
+this section does not name before it writes anything. Once the bead
 is handed over, either exit reads whether `bd` reports it ready, and nudges the
 agent when it does. That covers a `--then-assign` bead whose blocker closed
 before the hand-off was written, since that close found no route or assignee to

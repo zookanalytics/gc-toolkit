@@ -2,7 +2,7 @@
 # cycle-recycle.sh — deterministic proactive recycle for patrol agents.
 # Runs as a Claude Code `Stop` hook (every turn boundary) and, with --prompt, as
 # a `UserPromptSubmit` hook (before a prompt starts a turn), so the recycle is
-# enforced regardless of LLM state. Self-gates to witness | deacon | refinery;
+# enforced regardless of LLM state. Self-gates to witness | refinery;
 # no-ops for everyone else. It recycles a session for either of two reasons,
 # both read from the session transcript named on hook stdin:
 #   * context: at a turn's end, the context is over an absolute 200K threshold;
@@ -80,10 +80,11 @@ session_start() {
 # pack, each watched file of <role> whose mtime is later than the session's
 # first prompt: the role's prompt template and every fragment in the pack's
 # template-fragments/, which Gas City renders into the prompt at launch, and the
-# role's patrol formula, whose steps the session reads as it reaches them and
-# keeps. A fast-forward rewrites only the files whose content changed, so an
-# mtime is when the new text reached the checkout. The pack is the first of
-# GC_RIG_ROOT and the city's rigs/gc-toolkit that carries the role's formula.
+# role's patrol formula when it has one, whose steps the session reads as it
+# reaches them and keeps. The witness runs no formula. A fast-forward rewrites
+# only the files whose content changed, so an mtime is when the new text
+# reached the checkout. The pack is the first of GC_RIG_ROOT and the city's
+# rigs/gc-toolkit that carries the role's prompt template.
 # Prints nothing when no file changed, or when the start, the pack or the times
 # cannot be read: uncertain -> no drift. An mtime later than now counts as no
 # change, so a file stamped in the future cannot recycle a session on every
@@ -93,7 +94,7 @@ pack_drift() {
     case "$start" in '' | *[!0-9]*) return 0 ;; esac
     pack=""
     for c in "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-        [ -n "$c" ] && [ -f "$c/formulas/mol-$2-patrol.toml" ] && { pack="$c"; break; }
+        [ -n "$c" ] && [ -f "$c/agents/$2/prompt.template.md" ] && { pack="$c"; break; }
     done
     [ -n "$pack" ] || return 0
     now=$(date +%s)
@@ -128,7 +129,7 @@ fi
 if [ "$MODE" = --drift ]; then
     T=$(transcript_path)
     case "${2:-}" in
-      witness | deacon | refinery) [ -n "$T" ] && pack_drift "$T" "$2" ;;
+      witness | refinery) [ -n "$T" ] && pack_drift "$T" "$2" ;;
     esac
     exit 0
 fi
@@ -136,10 +137,10 @@ fi
 # --- 1. Self-gate: patrol roles only -------------------------------------
 AGENT="${GC_AGENT:-}"
 [ -n "$AGENT" ] || exit 0
-base="${AGENT##*/}"   # "gc-toolkit/gc-toolkit.witness" -> "gc-toolkit.witness"; "deacon" -> "deacon"
-role="${base##*.}"    # "gc-toolkit.witness" -> "witness"; "deacon" -> "deacon"
+base="${AGENT##*/}"   # "gc-toolkit/gc-toolkit.witness" -> "gc-toolkit.witness"
+role="${base##*.}"    # "gc-toolkit.witness" -> "witness"
 case "$role" in
-  witness | deacon | refinery) : ;;
+  witness | refinery) : ;;
   *) exit 0 ;; # not a patrol agent — no-op, never interrupt focused work
 esac
 
@@ -193,8 +194,8 @@ fi
 
 # (b) Refinery mid git-op: defer while a rebase/merge is in flight or a tracked
 # tree is dirty, in either the refinery's own worktree (CWD) or the rig's
-# canonical checkout ($GC_RIG_ROOT). Witness/deacon are idle pollers with no
-# long git ops, so this is refinery-only. Untracked files are normal scratch and
+# canonical checkout ($GC_RIG_ROOT). The witness runs no long git ops, so
+# this is refinery-only. Untracked files are normal scratch and
 # are ignored. doctor/check-recycle-capable applies the same test to the rig's
 # canonical checkout, and its suite runs this script to prove the two agree.
 if [ "$role" = refinery ]; then
@@ -229,18 +230,13 @@ The session recycled before this prompt reached it:
 $PROMPT"
 fi
 
-# `gc handoff` (non-auto) writes the durable HANDOFF mail first. For a
-# controller-restartable session, which the always-mode witness and deacon are,
-# it then requests the restart and signals the controller; for an on-demand
-# named session, the refinery, it only writes the mail and clears any restart
-# already requested. Non-auto is required so controller-restartable patrols
-# actually recycle — `--auto` would mail-only and never restart them. Its exit
-# status does not say whether it requested the restart, since it exits 1 when
-# it cannot signal the controller after the request is durably set. Its report
-# on stdout does (cmd/gc/cmd_handoff.go): "Handoff: sent mail <id>, requesting
-# restart..." once the request is set, and "Handoff: sent mail <id> (named
-# session; restart skipped)." when it requests none. MAILED records that the
-# mail was sent, which a handoff that fails with no report leaves unknown.
+# `gc handoff` (non-auto) writes the durable HANDOFF mail first. It requests a
+# restart only for a controller-restartable session, and the refinery and the
+# witness are on-demand named sessions, so for them it only writes the mail and
+# clears any restart already requested, and the reset below restarts them. Its
+# report on stdout names the mail (cmd/gc/cmd_handoff.go): "Handoff: sent mail
+# <id> (named session; restart skipped)." MAILED records that the mail was sent,
+# which a handoff that fails with no report leaves unknown.
 send_handoff() {
   if [ -n "$BODY" ]; then gc handoff "$SUBJECT" "$BODY"; else gc handoff "$SUBJECT"; fi
 }
@@ -248,7 +244,6 @@ RESTARTING=""; MAILED=""
 HANDOFF_OUT=$(send_handoff) && MAILED=1
 [ -z "$HANDOFF_OUT" ] || printf '%s\n' "$HANDOFF_OUT" >&2
 [ -n "$MAILED" ] || echo "cycle-recycle: gc handoff failed (non-fatal); reset still attempted" >&2
-case "$HANDOFF_OUT" in *", requesting restart"*) RESTARTING=1; MAILED=1 ;; esac
 
 # Reap this session's scratch now. The recycle abandons the tree whole — the
 # inheriting session gets a new id and a new tree — so the retiring session
@@ -278,11 +273,11 @@ if [ -n "$SID" ]; then
 fi
 
 # `gc session reset` requests a fresh restart for any session, which makes it
-# the refinery's only restart request, and it clears any tripped named-session
-# respawn circuit breaker. It signals the controller before it writes anything,
-# and the restart request is its last write, so a reset that fails requested
-# nothing: a restart the handoff requested still stands, and without one the
-# session keeps running and the hook tries again at its next check.
+# the only restart request for the refinery and the witness, and it clears any
+# tripped named-session respawn circuit breaker. It signals the controller
+# before it writes anything, and the restart request is its last write, so a
+# reset that fails requested nothing: the session keeps running and the hook
+# tries again at its next check.
 # Target precedence GC_ALIAS -> GC_SESSION_ID: the refinery legitimately runs
 # with an empty GC_ALIAS (it uses GC_AGENT as its mailbox), so falling back to
 # the session ID keeps reset working for it. Both forms are accepted by
@@ -291,15 +286,13 @@ RESET_TARGET="${GC_ALIAS:-${GC_SESSION_ID:-}}"
 if [ -n "$RESET_TARGET" ]; then
   if gc session reset "$RESET_TARGET" >&2; then
     RESTARTING=1
-  elif [ -n "$RESTARTING" ]; then
-    echo "cycle-recycle: gc session reset failed (non-fatal); the restart gc handoff requested stands" >&2
   else
     echo "cycle-recycle: gc session reset failed and gc handoff requested no restart; the session keeps running" >&2
   fi
 fi
 
-# Under --prompt, block the prompt exactly when a restart is requested, by the
-# handoff or by the reset. A turn let through would be killed mid-command when
+# Under --prompt, block the prompt exactly when the reset requested a restart. A
+# turn let through would be killed mid-command when
 # that restart lands, and a blocked prompt with no restart behind it would leave
 # the session idle on the old text, dropping each prompt it is sent. Claude Code
 # writes a blocked prompt's text to the session's transcript. A prompt let

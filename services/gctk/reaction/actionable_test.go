@@ -285,9 +285,9 @@ func TestAHandOffThatDoesNotLandFailsTheExit(t *testing.T) {
 
 // The refinery lists the beads assigned to it, so it takes the assignee, which
 // the release writes, and is nudged since the bead is ready; nothing is routed.
-// The keeper is no target of a first reaction, and the po, the deacon and the
-// witness take no bead; any other agent has no form this exit knows. Each is
-// refused before anything is read or written.
+// The keeper is no target of a first reaction, and the po and the witness take
+// no bead; any other agent has no form this exit knows. Each is refused before
+// anything is read or written.
 func TestTheRefineryTakesTheAssigneeAndTheOthersAreRefused(t *testing.T) {
 	w := newWorld(t)
 	code, _, err := w.dispose("tk-sub", "--disposition", "actionable", "--reason", "the branch is ready for the merge queue",
@@ -308,9 +308,9 @@ func TestTheRefineryTakesTheAssigneeAndTheOthersAreRefused(t *testing.T) {
 	for who, says := range map[string]string{
 		"gascity/gascity-keeper.keeper": "names the keeper, and a first reaction hands no bead to the keeper",
 		"gc-toolkit.keeper":             "names the keeper",
-		"gc-toolkit.deacon":             "names an agent that patrols its own wisps and takes no bead",
-		"deacon":                        "gc mail send deacon",
-		"gc-toolkit/gc-toolkit.witness": "gc mail send gc-toolkit/gc-toolkit.witness",
+		"gc-toolkit.witness":            "names an agent that takes no bead",
+		"witness":                       "gc mail send witness",
+		"gc-toolkit/gc-toolkit.witness": "gc mail send gc-toolkit/gc-toolkit.witness --notify",
 		"gc-toolkit/gc-toolkit.po":      "names the po, which takes no work by assignment",
 		"gc-toolkit/gc-toolkit.dog":     "names no agent this exit can hand a bead to",
 	} {
@@ -326,7 +326,7 @@ func TestTheRefineryTakesTheAssigneeAndTheOthersAreRefused(t *testing.T) {
 	w = newWorld(t)
 	code, _, err = w.dispose("tk-sub", "--disposition", "blocked", "--reason", "r", "--takeaway", "t", "--waiting-on", "tk-blk1", "--then-assign", "gc-toolkit/gc-toolkit.witness", "--run", root)
 	wantCode(t, code, 2, err, "(PATROL) --then-assign naming the witness")
-	errHas(t, err, "--then-assign gc-toolkit/gc-toolkit.witness names an agent that patrols its own wisps", "(PATROL) naming the flag")
+	errHas(t, err, "--then-assign gc-toolkit/gc-toolkit.witness names an agent that takes no bead", "(PATROL) naming the flag")
 	w = newWorld(t)
 	code, _, err = w.dispose("tk-sub", "--disposition", "blocked", "--reason", "r", "--takeaway", "t", "--waiting-on", "tk-blk1", "--then-assign", "gc-toolkit.keeper", "--run", root)
 	wantCode(t, code, 2, err, "--then-assign naming the keeper")

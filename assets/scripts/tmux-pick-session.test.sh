@@ -33,7 +33,7 @@
 #              slashless-GC_AGENT rule at once. The session-name rule has to
 #              be tried first, or a pool worker files under a rig named for
 #              no rig at all.
-#   (CITYNAMED) `gc-toolkit__deacon` carries "gc-toolkit.deacon", which is
+#   (CITYNAMED) `gc-toolkit__dog` carries "gc-toolkit.dog", which is
 #              slashless, and its session name has no "--". It reads "city".
 #              That is what the slashless rule is for, so a derivation that
 #              sent every slashless agent through the session name would
@@ -195,7 +195,7 @@ gc-toolkit--gc-toolkit__polecat-2-pool|0|1|gc-toolkit--gc-toolkit__polecat-2-poo
 gc-toolkit__polecat-hq-wisp-k7jiy|0|1|hq-wisp-k7jiy
 gc-toolkit--gc-toolkit__refinery|0|1|gc-toolkit/gc-toolkit.refinery
 gc-toolkit--gc-toolkit__ripley|0|1|gc-toolkit/gc-toolkit.ripley
-gc-toolkit__deacon|0|1|gc-toolkit.deacon
+gc-toolkit__dog|0|1|gc-toolkit.dog
 oversight--gc-toolkit__polecat-1-pool|0|1|oversight--gc-toolkit__polecat-1-pool
 rig-a--gc-toolkit__refinery-1-pool|0|1|rig-a--gc-toolkit__refinery-1-pool
 scratch|0|1|
@@ -226,7 +226,7 @@ cat > "$TMP/api.json" <<'API'
   {"session_name": "gc-toolkit__polecat-hq-wisp-k7jiy",        "template": "gc-toolkit/gc-toolkit.polecat",       "title": ""},
   {"session_name": "gc-toolkit--gc-toolkit__refinery",         "template": "gc-toolkit/gc-toolkit.refinery",      "title": "landing PR #497"},
   {"session_name": "gc-toolkit--gc-toolkit__ripley",           "template": "gc-toolkit/gc-toolkit.polecat-codex", "title": ""},
-  {"session_name": "gc-toolkit__deacon",                       "template": "gc-toolkit.deacon",                   "title": ""},
+  {"session_name": "gc-toolkit__dog",                          "template": "gc-toolkit.dog",                      "title": ""},
   {"session_name": "oversight--gc-toolkit__polecat-1-pool",    "template": "oversight/gc-toolkit.polecat",        "title": ""},
   {"session_name": "rig-a--gc-toolkit__refinery-1-pool", "template": "rig-a/gc-toolkit.refinery",     "title": ""},
   {"session_name": "scratch"}
@@ -336,8 +336,8 @@ eq "$(derives "$ALLMENU" 'gc-toolkit--gc-toolkit__converse-1-pool')" \
    'gc-toolkit|gc-toolkit.converse-1-pool' \
     "POOL: every pooled role derives the same way, not just polecat"
 
-# The deacon is hidden by the default filter, so this reads the --all menu.
-eq "$(derives "$ALLMENU" 'gc-toolkit__deacon')" 'city|gc-toolkit.deacon' \
+# The dog is hidden by the default filter, so this reads the --all menu.
+eq "$(derives "$ALLMENU" 'gc-toolkit__dog')" 'city|gc-toolkit.dog' \
     "CITYNAMED: slashless GC_AGENT with no '--' still reads city"
 
 eq "$(derives "$MENU" 'scratch')" 'city|scratch' \
@@ -368,8 +368,8 @@ has "$MENU" ' Sessions ▫ no roles ' \
 
 has "$ALLMENU" 'converse-1-pool' "ALL: --all reveals converse-N-pool"
 has "$ALLMENU" 'refinery-1-pool' "ALL: --all reveals refinery-N-pool"
-has "$ALLMENU" 'gc-toolkit.deacon' "ALL: --all reveals the name-hidden roles"
-hasnt "$MENU" 'gc-toolkit.deacon' \
+has "$ALLMENU" 'gc-toolkit.dog' "ALL: --all reveals the name-hidden roles"
+hasnt "$MENU" 'gc-toolkit.dog' \
     "NOROLES: the name-based hides are a separate rule and still apply"
 
 # --- template classification (live path) -----------------------------------
@@ -394,7 +394,7 @@ hasnt "$APIMENU" 'hq-wisp-k7jiy' \
     "WISP: it folds into its rig's count, hidden by the default filter"
 eq "$(derives "$APIALL" 'gc-toolkit__polecat-hq-wisp-k7jiy')" 'gc-toolkit|hq-wisp-k7jiy' \
     "WISP: --all reaches it under gc-toolkit; display is the wisp id"
-eq "$(derives "$APIALL" 'gc-toolkit__deacon')" 'city|gc-toolkit.deacon' \
+eq "$(derives "$APIALL" 'gc-toolkit__dog')" 'city|gc-toolkit.dog' \
     "CITYNAMED: a slashless template sets no rig, so it stays city on the live path"
 
 eq "$(derives "$APIMENU" 'gc-toolkit--gc-toolkit__converse-1-pool')" \

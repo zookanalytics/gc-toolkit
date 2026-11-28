@@ -276,6 +276,29 @@ else
   mkdir -p "$SRC" "$CITY/rigs/probe" "$RIG_ONLY/rigs/probe" "$GCH" "$TMP/real-gc" "$TMP/away"
   ln -s "$REAL_GC" "$TMP/real-gc/gc"
   ( cd "$ROOT" && git ls-files -co --exclude-standard -z | xargs -0 tar -cf - 2>/dev/null ) | tar -xf - -C "$SRC"
+  # A graph.v2 formula pours only in a city that runs a control-dispatcher, and
+  # this one runs none, so the pour is a formula with no formula_compiler need.
+  # The pack ships none, so the copy carries one of its own: one step whose
+  # resolver line reaches the pack's scripts through the binding its pour
+  # carries.
+  cat > "$SRC/formulas/mol-self-location-probe.toml" <<'TOML'
+description = "pack-self-location.test.sh's probe: one step that reaches the pack's scripts through its binding."
+formula = "mol-self-location-probe"
+
+[vars]
+[vars.binding_prefix]
+description = "Agent identity prefix with trailing dot."
+default = "gc-toolkit."
+
+[[steps]]
+id = "reach-scripts"
+title = "Reach the pack's scripts"
+description = """
+```bash
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/patrol-finding.sh" ] || SCRIPTS=""
+```
+"""
+TOML
   ( cd "$SRC" && git init -q -b main && git add -A \
       && git -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q -m "pack" )
   SHA=$(git -C "$SRC" rev-parse HEAD 2>/dev/null)
@@ -304,12 +327,10 @@ else
   RIG_KIT=$(IN_DIR="$CITY/rigs/probe" in_city gc kit scripts-dir 2>/dev/null)
   [ -n "$KIT" ] && [ "$RIG_KIT" = "$KIT" ] && ok "a shell in the rig gets the same answer" \
     || bad "a shell in the rig gets the same answer" "named '$RIG_KIT'"
-  # A graph.v2 formula pours only in a city that runs a control-dispatcher, and
-  # this one runs none, so the pour is a formula with no formula_compiler need.
-  COOK=$(in_city gc formula cook mol-witness-patrol --var binding_prefix=kit. --json 2>/dev/null)
-  STEP=$(printf '%s' "$COOK" | jq -r '.id_mapping["mol-witness-patrol.check-inbox"] // empty' 2>/dev/null)
-  [ -n "$STEP" ] && ok "the city pours mol-witness-patrol from the fetched pack" \
-    || bad "the city pours mol-witness-patrol from the fetched pack" "cook answered: $COOK"
+  COOK=$(in_city gc formula cook mol-self-location-probe --var binding_prefix=kit. --json 2>/dev/null)
+  STEP=$(printf '%s' "$COOK" | jq -r '.id_mapping["mol-self-location-probe.reach-scripts"] // empty' 2>/dev/null)
+  [ -n "$STEP" ] && ok "the city pours the probe formula from the fetched pack" \
+    || bad "the city pours the probe formula from the fetched pack" "cook answered: $COOK"
   jq -r --arg id "$STEP" '[.. | objects | select(.id? == $id) | .description] | .[0] // empty' "$CITY/.gc/beads.json" > "$TMP/step.md" 2>/dev/null
   LINE=$(grep -m1 -E "^SCRIPTS=\\\$\(b='kit\.'; gc " "$TMP/step.md")
   [ -n "$LINE" ] && ok "the poured step names the binding its pour carried" \

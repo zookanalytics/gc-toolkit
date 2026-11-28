@@ -55,7 +55,7 @@ func (m *cityMail) Count(context.Context) (int, string, error) {
 
 func TestCityPageRoute(t *testing.T) {
 	now := time.Date(2026, 11, 17, 1, 0, 0, 0, time.UTC)
-	l := &cityLog{started: now.Add(-3 * time.Hour)}
+	l := &cityLog{started: now.Add(-9 * time.Hour)}
 	s := New(WithCityPage(l, &cityMail{waiting: 130}, CityPageTTL))
 	s.now = func() time.Time { return now }
 	rr := get(t, s, "/helm/city")

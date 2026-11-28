@@ -43,7 +43,6 @@ when one is named, and are not committed:
 - [`converse-codex-sol`](agents/converse-codex-sol.md)
 - [`converse-fable`](agents/converse-fable.md)
 - [`converse-opus`](agents/converse-opus.md)
-- [`deacon`](agents/deacon.md)
 - [`demo`](agents/demo.md)
 - [`dog`](agents/dog.md)
 - [`gemini`](agents/gemini.md)
@@ -67,7 +66,6 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 
 | formula | scope |
 |---|---|
-| [`mol-deacon-patrol`](formulas/mol-deacon-patrol.md) | `city` |
 | [`mol-design-convoy`](formulas/mol-design-convoy.md) | `city` |
 | [`mol-do-work`](formulas/mol-do-work.md) | `city` |
 | [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` |
@@ -94,7 +92,6 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-upstream-gc-sync`](formulas/mol-upstream-gc-sync.md) | `gascity` |
 | [`mol-validate`](formulas/mol-validate.md) | `city` |
 | [`mol-validate-close`](formulas/mol-validate-close.md) | `city` |
-| [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` |
 
 ## Resolved fragment composition
 
@@ -118,7 +115,6 @@ runs to re-prime after compaction.
 | converse-codex-sol | `gascity`, `gc-toolkit` | 1 | _none_ |
 | converse-fable | `gascity`, `gc-toolkit` | 1 | _none_ |
 | converse-opus | `gascity`, `gc-toolkit` | 1 | _none_ |
-| deacon | `city` | 1 | _none_ |
 | demo | `gascity`, `gc-toolkit` | 1 | _none_ |
 | dog | `city` | 1 | _none_ |
 | gemini | `city`, `gascity`, `gc-toolkit` | 1 | _none_ |

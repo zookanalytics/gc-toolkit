@@ -25,7 +25,7 @@ grep -qE '\{\{-? *define "human-gate-withdraw" *-?\}\}' "$FRAG" \
   && ok "the fragment defines human-gate-withdraw" \
   || bad "template-fragments/human-gate-withdraw.template.md does not define \"human-gate-withdraw\""
 
-for role in witness deacon refinery proactive; do
+for role in witness refinery proactive; do
   P="$ROOT/agents/$role/prompt.template.md"
   [ -s "$P" ] || { bad "missing $P"; continue; }
   if grep -qE '\{\{-? *template "human-gate-withdraw" \. *-?\}\}' "$P"; then
@@ -59,7 +59,7 @@ fi
 
 # The roles whose prompts tell them when to file a gate say what the gate holds
 # from one fragment.
-for role in witness deacon refinery; do
+for role in witness refinery; do
   if grep -qE '\{\{-? *template "human-gate-holds" \. *-?\}\}' "$ROOT/agents/$role/prompt.template.md"; then
     ok "$role composes human-gate-holds"
   else

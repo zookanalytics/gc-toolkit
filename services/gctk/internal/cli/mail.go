@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,14 +16,91 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/mail"
 )
 
-// gctk mail notify is the mail-notify orders' verb (docs/gctk-architecture.md,
-// "The surface"), through the mail package.
+// gctk mail notify is the mail-notify orders' verb, and gctk mail finding the
+// witness's record of a NOTICE (docs/gctk-architecture.md, "The surface"),
+// through the mail package.
 
 func newMailCmd(stdout, stderr io.Writer) *cobra.Command {
-	return group("mail", "mail between sessions, and the turn it asks of its recipient",
+	return group("mail", "mail between sessions, the turn it asks of its recipient, and the finding a notice becomes",
 		`Mail between sessions. Gas City owns every message and its mailbox, and it
-requests a recipient's turn only when the sender asks for one.`,
-		newMailNotifyCmd(stdout, stderr))
+requests a recipient's turn only when the sender asks for one (mail notify).
+A NOTICE the witness reads becomes a patrol finding before it is archived
+(mail finding).`,
+		newMailNotifyCmd(stdout, stderr), newMailFindingCmd(stdout, stderr))
+}
+
+const mailFindingLong = `One mail filed as a patrol finding, the record a NOTICE leaves before the
+witness archives it. It reads the mail with gc mail peek <mail> --json, which
+leaves it unread, and files the finding through the pack's patrol-finding.sh,
+in the directory GCTK_SCRIPTS_DIR names, in the witness-findings scope, under
+--key and about the bead --about names. The finding's title is the mail's
+subject without its NOTICE: prefix, and its text is the mail's body, verbatim,
+then a Source section naming the mail, its sender, when it was sent and its
+subject, then a Witness section holding --note when one is given.
+
+Once the finding is filed it archives the mail. When nothing is filed it marks
+the mail unread, so the next turn that reads the mailbox meets it again. When
+that mark fails too, its line names gc mail mark-unread <mail>.
+
+patrol-finding.sh refuses a new finding that shares its key or its subject
+with a live finding in the scope, and lists those findings. When the mail
+reports one of their situations, run again with that finding's --key and
+--about, and the mail lands on it as an occurrence. When it reports another,
+run again with --distinct.
+
+exit: 0 filed, and the mail archived, or a line saying it was not
+      1 nothing filed: the mail did not read, or the writer filed nothing
+      2 usage
+      3 refused: a live finding shares the key or the subject, listed above`
+
+// mailFindingBound bounds one mail finding's reads and writes, from its start.
+var mailFindingBound = mail.FindingBound
+
+func newMailFindingCmd(stdout, stderr io.Writer) *cobra.Command {
+	var a mail.Ask
+	cmd := &cobra.Command{
+		Use:   "finding <mail> --key <key>",
+		Short: "file one mail as a patrol finding, and archive it once the finding is filed",
+		Long:  mailFindingLong,
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if a.Key == "" {
+				fmt.Fprintln(stderr, "gctk mail finding: --key names the situation the mail reports, and is required")
+				return exit(2)
+			}
+			a.Mail = args[0]
+			ctx, cancel := context.WithTimeout(cmd.Context(), mailFindingBound)
+			defer cancel()
+			city := gascity.New()
+			out := (&mail.Finding{City: city, Scripts: city.Within(ctx)}).File(ctx, a)
+			if o := strings.TrimRight(out.Output, "\n"); o != "" {
+				fmt.Fprintln(stdout, o)
+			}
+			stays, mark := "which stays unread", ""
+			if !out.Unread {
+				stays = "which may stay read"
+				mark = fmt.Sprintf(". Mark it unread with gc mail mark-unread %s, so the next turn that reads the mailbox meets it again", a.Mail)
+			}
+			switch {
+			case out.Archived:
+				fmt.Fprintf(stderr, "gctk mail finding: filed mail %s under %s and archived it\n", a.Mail, a.Key)
+				return nil
+			case out.Filed:
+				fmt.Fprintf(stderr, "gctk mail finding: filed mail %s under %s, but it was not archived: %s. Archive it with gc mail archive %s\n", a.Mail, a.Key, out.Why, a.Mail)
+				return nil
+			case out.Refused:
+				fmt.Fprintf(stderr, "gctk mail finding: nothing filed for mail %s, %s: a live finding listed above shares the key or the subject. Run again with its --key and --about when the mail reports its situation, or with --distinct when it reports another (%s)%s\n", a.Mail, stays, out.Why, mark)
+				return exit(mail.Refused)
+			}
+			fmt.Fprintf(stderr, "gctk mail finding: nothing filed for mail %s, %s: %s%s\n", a.Mail, stays, out.Why, mark)
+			return exit(1)
+		},
+	}
+	cmd.Flags().StringVar(&a.Key, "key", "", "the situation the mail reports, the way every finding key names one")
+	cmd.Flags().StringVar(&a.About, "about", "", "the bead the mail concerns, when it names one")
+	cmd.Flags().StringVar(&a.Note, "note", "", "what you know that the sender did not, added under Witness")
+	cmd.Flags().BoolVar(&a.Distinct, "distinct", false, "file it beside a live finding that shares its key or subject")
+	return cmd
 }
 
 const mailNotifyLong = `One pass of the mail-notify orders, which run it when mail is sent

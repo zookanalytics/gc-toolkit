@@ -5,8 +5,8 @@
 # only gc.execution_routed_to — provenance, not a dispatch path — and one whose
 # route or arm holds only whitespace), every exemption (routed, armed, assigned,
 # worked by a live run, merge anchor, held by either hold label in any case,
-# held by a converse sitting's gate, review/step/workflow metadata, every
-# standing kind, decision/epic/infra types), a bead carrying only the retired
+# held by a converse sitting's gate, review/step/workflow metadata, a triage
+# bucket, decision/epic/infra types), a bead carrying only the retired
 # placement marker, the per-rig labelling, the remedy string, the fail-closed
 # probes (unreadable blocked listing, unreadable runs, unreadable gate listing,
 # unreadable rig list), a raw control byte in a listing's row, and the quiet
@@ -328,22 +328,14 @@ blocked_store alpha "$(bmeta a-1 gc.demand_for a-9)"
 eq "$(run_check >/dev/null; echo $?)" "1" "a blocked task carrying a leftover gc.demand_for is plainly work — flagged"
 clear_stores
 
-# A standing record is never dispatched, so blocked-and-unrouted is its resting
-# state, and the arm remedy would sling it to a pool when its blocker closed.
-# The kinds come from the shared definition itself, so a kind added there is
-# exempted and covered here with no edit to this file.
-# shellcheck source=../../assets/scripts/standing-kinds.sh
-. "$HERE/../../assets/scripts/standing-kinds.sh"
-KINDS=$(jq -nr "$STANDING_KINDS_JQ"'standing_kinds[]')
-[ -n "$KINDS" ] && ok "the shared definition lists the standing kinds to exempt" \
-    || bad "the shared definition lists the standing kinds to exempt" "standing_kinds read back empty"
-for k in $KINDS; do
-    blocked_store alpha "$(bmeta a-1 task_kind "$k")"
-    OUT=$(run_check); RC=$?
-    eq "$RC" "0" "a blocked standing record (task_kind=$k) is not flagged"
-    hasnt "$OUT" "gctk bead arm a-1" "…and draws no arm remedy (task_kind=$k)"
-    clear_stores
-done
+# A triage bucket is a standing record nothing dispatches, so blocked and
+# unrouted is its resting state, and the arm remedy would sling it to a pool
+# when its blocker closed.
+blocked_store alpha "$(bmeta a-1 task_kind triage-subject)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a blocked triage bucket (task_kind=triage-subject) is not flagged"
+hasnt "$OUT" "gctk bead arm a-1" "…and draws no arm remedy (task_kind=triage-subject)"
+clear_stores
 
 # A feedback pattern waits on its follow-up, and the distiller decides it once
 # that closes, so the distiller is its dispatch path and an arm would sling it

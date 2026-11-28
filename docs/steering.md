@@ -77,8 +77,8 @@ finished work on a hold usually clears its route, because the next actor is not
 the pool that worked it, and intake holds new work with no route the same way.
 Gas City's `hold-label-routed-to` doctor check wants the route to equal the
 label's value, and Gas City's issue 6069 reports that check as a bug. So it
-warns on every held bead, and the deacon's patrol neither files that warning nor
-runs its fix (`formulas/mol-deacon-patrol.toml`).
+warns on every held bead. The doctor order never runs its fix, and
+`doctor/accepted.toml` accepts the warning, so the city page folds it.
 
 ## The writers that hold new work
 
@@ -102,8 +102,7 @@ Each writer that files or disposes new work follows the rule.
   bead's prefix names, on that agent's default formula. A bead it finds already
   tracking the failure it sends nowhere, so a failure is sent once.
 - **The witness** files mail about a pack defect as a bug carrying `hold:mayor`
-  from its create and routed to no pool (`formulas/mol-witness-patrol.toml`, the
-  `bug-file` block).
+  from its create and routed to no pool (`agents/witness/prompt.template.md`).
 - **The feedback distiller** files each prompt-update and engineering bead
   carrying `hold:mayor` from its create and routed to no pool
   (`formulas/mol-feedback-distiller.toml`, the file-and-dispatch step). The
@@ -186,11 +185,6 @@ hold for the pack's shell readers, which test rows they have already read. It
 reads either of Gas City's hold labels, `hold:mayor` and `hold:external`, each
 trimmed and in any case, as Gas City's own `HasDispatchHold` does. Its readers:
 
-- the liveness sweep names a held bead's wait, so it does not report the bead as
-  an unnamed wait;
-- the re-check a liveness gate's message carries (`liveness-recheck.sh`) names
-  the same wait, so a census cut before intake held the bead does not put it on
-  that gate's agenda as well;
 - `doctor/check-blocked-work-armed` owes a held bead no arm, because its dispatch
   is the route it gets once the sitting places it;
 - `doctor/check-po-queue-only` takes a bead routed or assigned to the po as
@@ -285,10 +279,10 @@ A hold also lifts these ways:
   closer's arm, takes this write too, because deferred dispatch fires a held
   bead's arm only once its hold lifts. A bead lifted with nothing else
   written is raw input again unless a first reaction held it: the proactive
-  scan reacts to it when intake is on, and the liveness sweep names it until
-  then. A bead a first reaction held keeps that reaction's headline, which
-  keeps the scan off it, so it takes another reaction only when someone asks
-  for one.
+  scan reacts to it when intake is on, and the board lists it under Not
+  scheduled until then. A bead a first reaction held keeps that reaction's
+  headline, which keeps the scan off it, so it takes another reaction only when
+  someone asks for one.
 - A close leaves the label on a closed bead, which nothing reads.
 
 `gc bd set-state` cannot lift a hold, because it refuses an empty value. A bead

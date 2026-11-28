@@ -78,7 +78,7 @@ registry that enumerates its consumers.
   this surface.
 - **Hook.** Code injected into a workflow at a named place, which runs because a
   formula step, a patrol, a commit or a tool use reaches it. The registry is its
-  call sites: formula steps, the doctor checks the deacon's patrol runs, and the
+  call sites: formula steps, the doctor checks the doctor order runs, and the
   git and tool-use hooks the pack installs.
 - **Order.** Code the city runs on a schedule, an event or a condition. The
   registry is the orders set, and every order meets
@@ -146,8 +146,9 @@ doc defines what holds a bead or whose move it is.
 | `gctk seed check` | hook | whether the render is current | The pre-commit hook and a doctor check read it, so a stale audit is caught before it lands. |
 | `gctk dolt reclaim` | order | reclaim each store at or over the reclaim line | The reclaim line is a store's on-disk noms size of `GC_DOLT_RECLAIM_THRESHOLD_MIB`, 2048 MiB by default, the size at which Gas City's `dolt-noms-size` doctor check warns. The supervisor runs no Dolt GC, and scheduled compaction skips a store under its commit threshold ([warrants.md](warrants.md#dolt-reclaim)). |
 | `gctk doctor run --accepted <file>` | order | run gc doctor once and record the run as one event: each check that fails and since when, each the run did not measure, each the operator accepted, and each monitor order's last good run | Gas City keeps no doctor result: `gc doctor --json` prints its report and stores nothing, and the supervisor's API serves no doctor route ([the search](../specs/tk-1tfzr71.158/gas-city-search.md#the-doctor-order-gctk-doctor-run-and-its-event)). So the verb records each run with `gc event emit` as one `gc-toolkit.doctor.ran` event, and the event log is the record. It adds what no primitive does. Each failing check carries the time it first failed and its streak, the runs in a row that measured it failing, from the previous run's event, so a reader can show only what two runs found. A run that did not complete, or did not measure a check, adds to no streak and ends none, as its help says. The checks `doctor/accepted.toml` names are marked accepted, which `[doctor]` config cannot express. Each monitor's newest `order.completed` is read from the events, because the city deletes a closed order-tracking bead. It runs `gc doctor` with no `--fix` under a deadline, and writes no bead. |
-| `gctk session progress` | order | find each pool seat that prints but has written nothing for three hours, and record them as one `gc-toolkit.seat-progress.stalled` event | Gas City's work ladder paces only a quiet pool seat, and nothing in Gas City reads a session's own writes ([the search](../specs/tk-1tfzr71.158/gas-city-search.md#gctk-session-progress)). The verb judges each busy pool seat by its newest write as the identity its claim is assigned to, in the claim's store and the city's, from no earlier than its last wake, and writes no bead. |
-| `gctk refinery stuck` | order | find each refinery handoff that has sat unprepared past four hours with nothing holding it, and record them as one `gc-toolkit.refinery-queue.stuck` event | Gas Town's check-refinery nudges the refinery and mails a report of the queue, and doctor's `pool-idle-routed-work` reads the routed work a pool leaves, not a refinery's assigned queue ([the search](../specs/tk-1tfzr71.158/gas-city-search.md#gctk-refinery-stuck-and-gctk-mail-finding)). The verb reads each rig's queue at the identity of the refinery `gc agent list` names for that rig, asks `bead holds` what holds each handoff past the bound, and writes no bead. |
+| `gctk session progress [--act]` | order | find each pool seat that prints but has written nothing for three hours, and record them as one `gc-toolkit.seat-progress.stalled` event, or with `--act` file the patrol finding `no-progress.<session>` for each | Gas City's work ladder paces only a quiet pool seat, and nothing in Gas City reads a session's own writes ([the search](../specs/tk-1tfzr71.158/gas-city-search.md#gctk-session-progress)). The verb judges each busy pool seat by its newest write as the identity its claim is assigned to, in the claim's store and the city's, from no earlier than its last wake or the last time Gas City recorded a prompt it waited at answered. A nudge from the work ladder restarts nothing, since it shows only that the notice reached the seat. Run plain it writes no bead. The seat-progress-report order runs it with `--act` on the look's event, and it reads again, since an exec order learns nothing of the event that fired it, and files through `patrol-finding.sh`. |
+| `gctk refinery stuck [--act]` | order | find each refinery handoff that has sat unprepared past four hours with nothing holding it, and record them as one `gc-toolkit.refinery-queue.stuck` event, or with `--act` file a human gate on each | Gas Town's check-refinery nudges the refinery and mails a report of the queue, and doctor's `pool-idle-routed-work` reads the routed work a pool leaves, not a refinery's assigned queue ([the search](../specs/tk-1tfzr71.158/gas-city-search.md#gctk-refinery-stuck-and-gctk-mail-finding)). The verb reads each rig's queue at the identity of the refinery `gc agent list` names for that rig, and asks `bead holds` what holds each handoff past the bound. Run plain it writes no bead. The refinery-queue-report order runs it with `--act` on the look's event, and it reads again and files the gate through `human-gate.sh`, whose open gate holds the handoff. |
+| `gctk mail finding <mail> --key <key>` | agent | file one mail as a patrol finding in the witness's scope, and archive the mail once the finding is filed | `gc mail` reads, peeks, archives and marks mail, and turns none into a record ([the search](../specs/tk-1tfzr71.158/gas-city-search.md#gctk-refinery-stuck-and-gctk-mail-finding)). The witness files each NOTICE it reads with this one call: the mail's body verbatim under the key the witness names, with where it came from, through `patrol-finding.sh`. A mail that files nothing is marked unread again, so the next turn that reads the mailbox meets it. |
 | `gctk deployment report --rig <rig> [--environment <name>]` | order | report a rig's run of failed deployments to an environment as one patrol finding in its store, and clear its situation once a deployment succeeds | Gas City reads no deployment, and bd's `bd github` syncs issues alone ([the search](../specs/tk-vkio7qb/gas-city-search.md)). GitHub keeps each deployment's status, but nothing in the city reads it, so a deployment that fails is seen only by someone who opens the host. The verb reads the environment's newest deployments in one GitHub call, decides from the newest finished one, and files, notes or clears the finding through `patrol-finding.sh`, which dedups it on its key and slings its first reaction. Its text is made from the run alone, so a pass that finds nothing new only counts on the finding. |
 | `gctk mail notify --agents <names>` | order | request a turn for each named agent's session that holds unread mail no notice will tell it of | Gas City requests a recipient's turn only when the sender passes `--notify`, and the API's send and reply, which the dashboard uses, cannot ask for one ([warrants.md](warrants.md#mail-wake), and [the search](../specs/tk-qpnzxnj/gas-city-search.md)). The verb reads the sessions of the named agents that can wake, their unread mail and the notices still queued for them, and sends one wait-idle `gc session nudge` naming each new message's sender, so mail from any sender requests the turn. Its ledger keeps each message nudged for while the message stays unread, so a pass that runs again on the same mail requests no second turn. orders/mail-notify-on-send.toml and orders/mail-notify-on-reply.toml run it on each send and reply, and orders/mail-notify-reconcile.toml on a cadence, which recovers mail whose event's run failed or never came. It is debt: once a Gas City release wakes a session on its mail, as gastownhall/gascity#1966 rules it will, the verb retires with its orders. |
 | `gctk version` | hook | the revision this binary was built from | The build stamps one hash over gctk's inputs, services/gctk and the root go.mod and go.sum, so a doctor check can tell whether the deployed binary is the one the checkout builds. |
@@ -227,11 +228,14 @@ What each noun owns:
   file it reads, `doctor/accepted.toml`, is config in the pack, and a PR the
   operator approves is the ruling on each entry.
 - **`session`:** the record of each seat-progress look, the
-  `gc-toolkit.seat-progress.stalled` event, and the shape of its payload. A
-  session's state and its title are Gas City's record and the agent's own
-  terminal.
+  `gc-toolkit.seat-progress.stalled` event, and the shape of its payload. Its
+  act's one bead write is the patrol finding `no-progress.<session>`, which it
+  files through the runtime adapter's `patrol-finding.sh`. A session's state
+  and its title are Gas City's record and the agent's own terminal.
 - **`refinery`:** the record of each queue look, the
-  `gc-toolkit.refinery-queue.stuck` event, and the shape of its payload.
+  `gc-toolkit.refinery-queue.stuck` event, and the shape of its payload. Its
+  act's one bead write is the human gate `witness-refinery-queue`, which it
+  files through the runtime adapter's `human-gate.sh`.
 - **`deployment`:** nothing of its own. It reads each deployment from GitHub
   again on every pass, and its one bead write is the patrol finding
   `deployment.<environment>` in the rig's store, which it files, notes and
@@ -241,7 +245,8 @@ What each noun owns:
   requested a turn for, and the lock every pass holds while it reads and writes
   the ledger, `mail-notify.lock` beside it. Each message, its mailbox and its
   read mark are Gas City's, and the pass's one write outside its own files is a
-  nudge.
+  nudge. A notice's finding is the patrol finding the witness names, which
+  `mail finding` files through the runtime adapter's `patrol-finding.sh`.
 - **`dolt`:** nothing.
 
 What gets a verb:
@@ -881,11 +886,10 @@ why a reader must know it, and the work that retires it.
   reads them itself, spelling each key, against rules 1 and 6:
   `bead-context.sh`, the `converse-recheck-premise` skill's close,
   `doctor/check-claim-advancing` and `doctor/check-root-advancing`, which count
-  a headline as a hold on purpose, `doctor/check-wait-is-an-edge`, which reads
-  the headline as a hold marker through `lifecycle/lifecycle.toml`'s `[holds]`,
-  and the liveness recheck, which tk-1tfzr71.174 retires. `gctk lifecycle
-  --takeaway` can also write the keys. So the keys stay registered in
-  `lifecycle/lifecycle.toml`. tk-1tfzr71.216
+  a headline as a hold on purpose, and `doctor/check-wait-is-an-edge`, which
+  reads the headline as a hold marker through `lifecycle/lifecycle.toml`'s
+  `[holds]`. `gctk lifecycle --takeaway` can also write the keys. So the keys
+  stay registered in `lifecycle/lifecycle.toml`. tk-1tfzr71.216
   decides whether the keys retire onto the bead's notes or stay with a warrant,
   and that decision moves these reads onto the domain or retires them with the
   keys.

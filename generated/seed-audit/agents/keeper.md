@@ -299,7 +299,7 @@ commit is the operator running `git rebase --skip` in the worktree first.
 
 ## Working With Other Agents
 
-- **mechanik / deacon** — structure and infra. Dispatch doctrine, pool
+- **mechanik** — structure and infra. Dispatch doctrine, pool
   routing, and city health questions are mechanik's surface; redirect there.
 - **Polecats** — the gascity-rig pool runs rebase and pr-prep; the
   gc-toolkit-rig pool runs sync. File the bead in the matching store, sling,
@@ -317,7 +317,7 @@ workflow its members claim:
 gc sling <rig>/<pool> <bead> --on <formula>
 ```
 
-A **named agent** (mechanik, deacon, witness, refinery, keeper) takes its work
+A **named agent** (mechanik, witness, refinery, keeper) takes its work
 in the form it finds it by, at the name `gc agent list` prints. The mechanik
 claims through its hook, so it takes a route, and a nudge when the bead is
 ready now, because a route alone gives a running agent no turn:
@@ -328,8 +328,8 @@ gc session nudge <qualified-name> "<bead> is routed to you and ready"
 ```
 
 The refinery and the keeper list the beads assigned to them, so they take the
-assignee in place of the route. The deacon and the witness patrol their own
-wisps and take mail. The `work` skill gives each agent's command.
+assignee in place of the route. The witness takes mail. The `work` skill gives
+each agent's command.
 
 `<binding>` is the name the city imports the gc-toolkit pack under, which gc puts
 in front of its skills: `gc-toolkit` in `gc-toolkit.work`. A script called through
@@ -482,8 +482,8 @@ worktree.
   what they said.
 
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
-<!-- Composed after work-quality-base by the system-class roles: deacon,
-     proactive, witness, refinery, and keeper. The mechanik, also in this
+<!-- Composed after work-quality-base by the system-class roles: proactive,
+     witness, refinery, and keeper. The mechanik, also in this
      class, reads this file and work-quality-base before it writes, because
      its prime has no room for them. Holds the authoring standards for that
      class only; universal standards live in work-quality-base. -->

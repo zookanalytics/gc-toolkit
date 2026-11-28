@@ -108,7 +108,7 @@ hook_said() {
 
 unreadable() {
   echo "ENTRY unreadable: $*"
-  echo "NEXT=none: do not drain and do not close anything. Run this again, and if it stays unreadable, say so in the thread, mail the witness HELP:, and wait"
+  echo "NEXT=none: do not drain and do not close anything. Run this again, and if it stays unreadable, say so in the thread, mail the witness HELP: with --notify, and wait"
   hook_said
   exit 1
 }

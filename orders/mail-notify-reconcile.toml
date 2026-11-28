@@ -17,7 +17,7 @@
 # for its turn. A city that changes GCTK_MAIL_NOTIFY_AGENTS changes it for
 # each mail-notify order.
 [order]
-description = "On a cadence, request a turn for each converse sitting that holds unread mail no notice has told it of, so mail an event's run missed still wakes it"
+description = "On a cadence, request a turn for each converse sitting and each witness that holds unread mail no notice has told it of, so mail an event's run missed still wakes it"
 trigger = "cooldown"
 interval = "15m"
 timeout = "150s"
@@ -25,5 +25,6 @@ exec = "\"${GCTK_BIN:-$GC_CITY_PATH/.gc/services/gctk/bin/gctk}\" mail notify --
 scope = "city"
 
 [order.env]
-# The pack's converse templates, the agents under agents/converse-*.
-GCTK_MAIL_NOTIFY_AGENTS = "converse-claude-fable converse-claude-opus converse-codex converse-codex-astra converse-codex-sol converse-fable converse-opus"
+# The pack's converse templates, the agents under agents/converse-*, and the
+# witness, which runs only for its mail.
+GCTK_MAIL_NOTIFY_AGENTS = "converse-claude-fable converse-claude-opus converse-codex converse-codex-astra converse-codex-sol converse-fable converse-opus witness"

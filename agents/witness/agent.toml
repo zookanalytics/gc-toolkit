@@ -1,14 +1,16 @@
-# witness — per-rig work-health recovery patrol (named singleton, always;
-# stanza in pack.toml). Runs mol-witness-patrol: orphan recovery + refinery
-# queue health. Stall/parked detection is the liveness-sweep exec order's.
+# witness — the rig's mail triage (named singleton, on demand; stanza in
+# pack.toml). Mail sent with --notify wakes it, and its prompt answers HELP and
+# files each NOTICE. The seat and refinery-queue checks it once ran are the
+# seat-progress and refinery-queue orders.
 scope = "rig"
 wake_mode = "fresh"
-# A rig worktree so this rig-scoped patrol's cwd resolves to the rig it serves,
-# like the polecat/proactive/refinery pools. The patrol already targets the rig
-# via git -C "$GC_RIG_ROOT"; the worktree makes bare gh/git and the
-# rev-parse-based script lookup resolve to the rig too, not the city repo the
-# .gc tree sits in. One tree per rig (no {{.AgentBase}}): witness is a singleton.
+# A rig worktree so the witness's cwd resolves to the rig it serves, like the
+# polecat/proactive/refinery pools: a HELP mail asks about a bead in the rig,
+# and its answer reads the rig's tree and branches. The worktree makes bare
+# gh/git and the rev-parse-based script lookup resolve to the rig, not the city
+# repo the .gc tree sits in. One tree per rig (no {{.AgentBase}}): witness is a
+# singleton.
 work_dir = ".gc/worktrees/{{.Rig}}/witness"
 pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
-nudge = "Run gc prime, then the startup wisp reconcile; patrol the rig."
+nudge = "Run gc prime, then read your mail"
 idle_timeout = "2h"

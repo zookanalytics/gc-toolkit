@@ -1,8 +1,10 @@
 # mail-notify-on-send — when mail is sent, request a turn for each converse
-# sitting that holds unread mail no notice has told it of. Gas City requests a
-# recipient's turn only when the sender passes --notify, and mail sent from
-# the dashboard cannot, so without this a sitting sees its mail only when the
-# operator next types in it. `gctk mail notify --help` states the rule.
+# sitting and each witness that holds unread mail no notice has told it of. Gas
+# City requests a recipient's turn only when the sender passes --notify, and
+# mail sent from the dashboard cannot, so without this a sitting sees its mail
+# only when the operator next types in it, and a witness, which runs only for
+# its mail, sleeps through mail a sender sent without it. `gctk mail notify
+# --help` states the rule.
 #
 # The event starts the pass and decides nothing. The pass reads each sitting's
 # unread mail again, so a message already read, mail a sitting sends itself,
@@ -38,7 +40,7 @@
 # (gastownhall/gascity#1966). Once the city runs a Gas City that does, the
 # mail-notify orders and the verb retire.
 [order]
-description = "When mail is sent, request a turn for each converse sitting that holds unread mail no notice has told it of"
+description = "When mail is sent, request a turn for each converse sitting and each witness that holds unread mail no notice has told it of"
 trigger = "event"
 on = "mail.sent"
 timeout = "150s"
@@ -46,5 +48,6 @@ exec = "\"${GCTK_BIN:-$GC_CITY_PATH/.gc/services/gctk/bin/gctk}\" mail notify --
 scope = "city"
 
 [order.env]
-# The pack's converse templates, the agents under agents/converse-*.
-GCTK_MAIL_NOTIFY_AGENTS = "converse-claude-fable converse-claude-opus converse-codex converse-codex-astra converse-codex-sol converse-fable converse-opus"
+# The pack's converse templates, the agents under agents/converse-*, and the
+# witness, which runs only for its mail.
+GCTK_MAIL_NOTIFY_AGENTS = "converse-claude-fable converse-claude-opus converse-codex converse-codex-astra converse-codex-sol converse-fable converse-opus witness"

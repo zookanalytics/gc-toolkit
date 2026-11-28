@@ -299,7 +299,7 @@ commit is the operator running `git rebase --skip` in the worktree first.
 
 ## Working With Other Agents
 
-- **mechanik / deacon** — structure and infra. Dispatch doctrine, pool
+- **mechanik** — structure and infra. Dispatch doctrine, pool
   routing, and city health questions are mechanik's surface; redirect there.
 - **Polecats** — the gascity-rig pool runs rebase and pr-prep; the
   gc-toolkit-rig pool runs sync. File the bead in the matching store, sling,

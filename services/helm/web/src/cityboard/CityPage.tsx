@@ -218,7 +218,7 @@ function RunNote({ doctor: d }: { doctor: Doctor }) {
       <p>
         Doctor last ran at {when(d.started ?? '')}.
         {d.late && (
-          <strong style={{ color: AMBER }}> Late: doctor runs every hour, and this run started over two hours ago.</strong>
+          <strong style={{ color: AMBER }}> Late: doctor runs every four hours, and this run started over eight hours ago.</strong>
         )}
         {!d.completed && (
           <>

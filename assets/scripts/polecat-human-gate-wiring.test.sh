@@ -14,13 +14,13 @@
 # quiet window.
 #
 # The sender half is useless without the receiver half, so this pins both: the
-# doctrine that tells the polecat to mail HELP or NOTICE, and the witness patrol
-# step that triages it.
+# doctrine that tells the polecat to mail HELP or NOTICE with --notify, which
+# wakes the witness, and the witness's prompt, which triages it.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$HERE/../.."
 DOCTRINE="$ROOT/template-fragments/polecat-doctrine.template.md"
-WITNESS="$ROOT/formulas/mol-witness-patrol.toml"
+WITNESS="$ROOT/agents/witness/prompt.template.md"
 FORMULA="$ROOT/formulas/mol-polecat-work.toml"
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
@@ -30,9 +30,9 @@ bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 [ -s "$WITNESS" ]  || { echo "missing $WITNESS" >&2; exit 1; }
 [ -s "$FORMULA" ]  || { echo "missing $FORMULA" >&2; exit 1; }
 
-grep -qF 'gc mail send "${GC_RIG:+$GC_RIG/}{{ .BindingPrefix }}witness"' "$DOCTRINE" \
-  && ok "doctrine mails the blocker to the binding-qualified witness address" \
-  || bad "doctrine's witness address must carry the rig and binding prefixes; a bare <rig>/witness names no configured agent"
+grep -qF 'gc mail send "${GC_RIG:+$GC_RIG/}{{ .BindingPrefix }}witness" --notify' "$DOCTRINE" \
+  && ok "doctrine mails the blocker to the binding-qualified witness address, with --notify to wake it" \
+  || bad "doctrine's witness address must carry the rig and binding prefixes, and the send --notify: a bare <rig>/witness names no configured agent, and the witness runs only when mail wakes it"
 
 grep -q 'HELP:' "$DOCTRINE" \
   && ok "doctrine names the HELP: subject prefix the witness triages on" \
@@ -62,14 +62,14 @@ fi
 # The witness answers HELP mail it can, and files the rest as a polecat-help
 # finding whose first reaction puts it to a person when one is needed.
 grep -q 'HELP' "$WITNESS" && grep -q -- '--key polecat-help' "$WITNESS" \
-  && ok "witness patrol still triages HELP mail and files what it cannot answer as a finding" \
-  || bad "witness patrol no longer receives what the doctrine tells polecats to send"
+  && ok "the witness still triages HELP mail and files what it cannot answer as a finding" \
+  || bad "the witness no longer receives what the doctrine tells polecats to send"
 
 # A NOTICE reports a fact the sender does not own. The witness files every one
 # as a finding, so a notice the doctrine sends always reaches a tracked record.
-grep -q 'NOTICE:' "$DOCTRINE" && grep -q '# >>> notice-finding' "$WITNESS" \
+grep -q 'NOTICE:' "$DOCTRINE" && grep -q '"$GCTK" mail finding <mail id> --key' "$WITNESS" \
   && ok "the doctrine's NOTICE: mail has a receiver that files it as a finding" \
-  || bad "the doctrine sends NOTICE: mail that the witness patrol no longer files"
+  || bad "the doctrine sends NOTICE: mail that the witness no longer files"
 
 echo
 echo "polecat-human-gate-wiring: $PASS passed, $FAIL failed"

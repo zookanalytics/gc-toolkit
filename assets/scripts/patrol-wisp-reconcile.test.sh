@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Hermetic test for the patrol-wisp LEAK GUARDS of every patrolling agent:
-# witness, deacon and refinery.
+# Hermetic test for the patrol-wisp LEAK GUARD of the refinery, the one agent
+# that still reconciles a patrol wisp.
 #
 # THE LEAK: a mol-<agent>-patrol wisp that no query can see survives every
 # reconcile pass and accumulates one row per interrupted pour. Three
@@ -12,36 +12,22 @@
 #   2. AN --assignee-SCOPED RECONCILE CANNOT SEE THAT WISP. It matches no
 #      query on this restart or any later one, so it is unreachable garbage.
 #      Reconcile stays assignee-BLIND and matches by TITLE. The per-rig
-#      witness and refinery then narrow to THIS rig: several rigs run this
+#      refinery then narrows to THIS rig: several rigs run this
 #      pack and pour the same patrol title into one shared store, so title
 #      alone collides across rigs. A wisp is this rig's when its assignee
 #      segment or pour-stamped gc.rig names this rig, or when it names no rig
-#      yet (a fresh orphan); one naming another rig is left for that rig. The
-#      deacon is a city singleton with no rig, so it reconciles by title alone
-#      and takes no rig scope: GC_RIG arrives unset for it and its assignee
-#      carries no rig segment, so a rig filter could never match its own wisp.
+#      yet (a fresh orphan); one naming another rig is left for that rig.
 #   3. A WISP IS AN EPHEMERAL MOLECULE. `--include-infra` is required or every
 #      wisp query reads empty, and `--type=wisp` is not an issue type at all —
 #      it errors. Either way the caller concludes "no wisp" and the row it was
 #      looking for leaks.
-#   4. THE DEACON'S STORE FOLLOWS ITS SHELL. Without `--city`, `gc bd list` and
-#      `gc bd mol wisp` answer from the store the working directory selects,
-#      and the deacon's shell keeps whatever directory it last changed to. From
-#      a rig checkout its reconcile reads that rig's store, finds no wisp, and
-#      pours one there, where no later city-store reconcile looks. So every
-#      deacon query and pour names the city store.
 #
-# Two guards per agent, both executed here, extracted verbatim from the shipped
-# instructions so the test cannot drift from what the agent actually reads:
-#
-#   - RECONCILE (agents/<agent>/prompt.template.md, `patrol-wisp-reconcile`) —
-#     title-scoped, rig-scoped, assignee-blind, ephemeral-aware collection.
-#   - POUR (formulas/mol-<agent>-patrol.toml, `patrol-wisp-pour`) — a failed
-#     assign rolls the pour back and refuses to burn the current wisp.
-#
-# The refinery's pour is no block of text but a script, `refinery-patrol.sh
-# next`, whose own suite (refinery-patrol.test.sh) runs its guard, so this
-# suite checks the refinery's reconcile alone.
+# The guard is the RECONCILE (agents/refinery/prompt.template.md,
+# `patrol-wisp-reconcile`), extracted verbatim from the shipped instructions so
+# the test cannot drift from what the agent actually reads: title-scoped,
+# rig-scoped, assignee-blind, ephemeral-aware collection. The refinery's pour is
+# no block of text but a script, `refinery-patrol.sh next`, whose own suite
+# (refinery-patrol.test.sh) runs its guard.
 #
 # No live city, Dolt, network, or wisps — only jq and a tmpdir.
 set -euo pipefail
@@ -90,14 +76,6 @@ set -u
 # test by looking like "nothing found".
 VALID_TYPES=" bug feature task epic chore decision agent convergence convoy event gate merge-request message molecule rig role session spec step "
 
-# A call names the city store with a non-empty --city; gc treats an empty one
-# as absent. An unnamed store is the ambient one the working directory selects:
-# GC_AMBIENT_FIXTURE when the caller sets it, else the same fixture.
-city_pinned=false
-for a in "$@"; do
-  case "$a" in --city=?*) city_pinned=true ;; esac
-done
-
 case "${1:-} ${2:-}" in
   "bd list")
     status=all
@@ -115,7 +93,6 @@ case "${1:-} ${2:-}" in
       esac
     done
     store="$GC_FIXTURE"
-    [ "$city_pinned" = false ] && [ -n "${GC_AMBIENT_FIXTURE:-}" ] && store="$GC_AMBIENT_FIXTURE"
     if [ -n "$type" ]; then
       case "$VALID_TYPES" in
         *" $type "*) ;;
@@ -141,15 +118,6 @@ case "${1:-} ${2:-}" in
       [ "${GC_BURN_FAILS:-0}" = "1" ] && exit 1
       exit 0
     fi
-    # gc bd mol wisp <formula> --root-only ... --json
-    if [ "${3:-}" = "wisp" ]; then
-      if [ -n "${GC_POURED_IN:-}" ]; then
-        if [ "$city_pinned" = true ]; then echo city >> "$GC_POURED_IN"; else echo ambient >> "$GC_POURED_IN"; fi
-      fi
-      [ "${GC_POUR_EMPTY:-0}" = "1" ] && { echo '{}'; exit 0; }
-      echo '{"new_epic_id":"w-new"}'
-      exit 0
-    fi
     ;;
   "bd update")
     echo "$3" >> "$GC_UPDATED"
@@ -165,11 +133,9 @@ exit 0
 STUB
 chmod +x "$TMP/bin/gc"
 
-# --- Runners. ----------------------------------------------------------------
-# Both read $AGENT_ID and the extracted snippet files the agent loop writes.
-# Each run sets GC_CITY_PATH, as every session's environment does. A caller
-# that sets RUN_AMBIENT to a fixture file runs the snippet in a directory whose
-# own store differs from the city store: an unpinned query reads RUN_AMBIENT.
+# --- Runner. -----------------------------------------------------------------
+# It reads $AGENT_ID and the extracted snippet file the agent loop writes. Each
+# run sets GC_CITY_PATH, as every session's environment does.
 
 # run_reconcile <fixture-json> -> "<survivor>|<burned,ids>"
 run_reconcile() {
@@ -180,28 +146,13 @@ run_reconcile() {
   : > "$TMP/burned"; : > "$TMP/wisp"
   ( export PATH="$TMP/bin:$PATH" GC_FIXTURE="$TMP/fixture.json" \
            GC_BURNED="$TMP/burned" GC_UPDATED="$TMP/updated" GC_AGENT="$AGENT_ID" \
-           GC_RIG="$AGENT_RIG" GC_CITY_PATH="/city" GC_AMBIENT_FIXTURE="${RUN_AMBIENT:-}"
+           GC_RIG="$AGENT_RIG" GC_CITY_PATH="/city"
     # shellcheck disable=SC1090,SC1091
     . "$script"
     printf '%s' "$WISP" > "$TMP/wisp" )
   printf '%s|%s' "$(cat "$TMP/wisp")" "$(sort "$TMP/burned" | paste -sd, -)"
 }
 
-# run_pour <assign-fails> <pour-empty> <burn-fails> <gc-bead-id> [fixture] [script]
-#   -> "<exit>|<burned,ids>|<updated,ids>"
-run_pour() {
-  : > "$TMP/burned"; : > "$TMP/updated"; : > "$TMP/poured"
-  printf '%s' "${5:-[]}" > "$TMP/fixture.json"
-  local script="${6:-$TMP/pour.sh}" rc=0
-  ( export PATH="$TMP/bin:$PATH" GC_FIXTURE="$TMP/fixture.json" \
-           GC_BURNED="$TMP/burned" GC_UPDATED="$TMP/updated" GC_AGENT="$AGENT_ID" \
-           GC_RIG="$AGENT_RIG" GC_BEAD_ID="${4:-}" GC_CITY_PATH="/city" \
-           GC_AMBIENT_FIXTURE="${RUN_AMBIENT:-}" GC_POURED_IN="$TMP/poured" \
-           GC_ASSIGN_FAILS="${1:-0}" GC_POUR_EMPTY="${2:-0}" GC_BURN_FAILS="${3:-0}"
-    bash "$script" >/dev/null 2>&1 ) || rc=$?
-  printf '%s|%s|%s' "$rc" \
-    "$(sort "$TMP/burned" | paste -sd, -)" "$(sort "$TMP/updated" | paste -sd, -)"
-}
 
 # --- Fixtures. ---------------------------------------------------------------
 # fx substitutes the placeholders: @T@ patrol title, @A@ this rig's agent
@@ -249,24 +200,6 @@ FX_TWO_INPROGRESS='[
   {"id":"w-stale","status":"in_progress","title":"@T@","assignee":"@A@","created_at":"2026-09-18T03:00:00Z","issue_type":"molecule","ephemeral":true},
   {"id":"w-live", "status":"in_progress","title":"@T@","assignee":"@A@","created_at":"2026-09-18T03:05:00Z","issue_type":"molecule","ephemeral":true}
 ]'
-# For the pour snippet that resolves the current wisp itself: w-cur is ours,
-# w-orph is an unowned wisp of the same title, w-decoy is ours but not a patrol.
-FX_CURRENT='[
-  {"id":"w-orph", "status":"in_progress","title":"@T@","assignee":"",   "created_at":"2026-09-18T03:00:00Z","issue_type":"molecule","ephemeral":true},
-  {"id":"w-decoy","status":"in_progress","title":"mol-doc-keeper-drift-audit","assignee":"@A@","created_at":"2026-09-18T03:01:00Z","issue_type":"molecule","ephemeral":true},
-  {"id":"w-cur",  "status":"in_progress","title":"@T@","assignee":"@A@","created_at":"2026-09-18T03:02:00Z","issue_type":"molecule","ephemeral":true}
-]'
-# The witness leaves its successor deferred for the hour between passes
-# (w-next, status deferred, newest). A session restarted inside that hour finds
-# only that successor, or, when the session stopped between its defer and its
-# burn, the completed cycle beside it.
-FX_DEFERRED_ONLY='[
-  {"id":"w-next","status":"deferred","title":"@T@","assignee":"@A@","metadata":{"gc.rig":"@R@"},"created_at":"2026-09-18T03:05:00Z","issue_type":"molecule","ephemeral":true}
-]'
-FX_DEFERRED_SUCCESSOR='[
-  {"id":"w-done","status":"in_progress","title":"@T@","assignee":"@A@","created_at":"2026-09-18T03:00:00Z","issue_type":"molecule","ephemeral":true},
-  {"id":"w-next","status":"deferred",   "title":"@T@","assignee":"@A@","metadata":{"gc.rig":"@R@"},"created_at":"2026-09-18T03:05:00Z","issue_type":"molecule","ephemeral":true}
-]'
 # Cross-rig: several rigs pour the same title into one shared store. A foreign
 # rig's wisp — assignee names @O@ — must be neither adopted as the survivor nor
 # burned as surplus; only this rig's wisps (w-mine, w-orph) are reconciled.
@@ -294,49 +227,28 @@ fx() {
 }
 
 # --- Per-agent contracts. ----------------------------------------------------
-# Fields: agent | scope (rig|city) | happy-path pour result | assign-fails
-# rollback result | does the pour snippet also resolve and burn the CURRENT
-# wisp? The witness and deacon both do it in the same block, so each snippet
-# burns its own current wisp on the happy path. The per-rig witness stamps
-# gc.rig before the assign (two updates) and then defers its next wisp (a
-# third); a failed assign exits before that defer. The city-singleton deacon
-# takes no rig scope, so it only assigns (one update). The refinery has no pour
-# block, so its pour fields are `-`.
+# Fields: agent | scope. The refinery runs per rig, with GC_RIG set and a
+# rig-prefixed assignee.
 AGENTS=(
-  "witness  rig  0|w-cur|w-new,w-new,w-new 1|w-new|w-new,w-new yes"
-  "deacon   city 0|w-cur|w-new       1|w-new|w-new       yes"
-  "refinery rig  -                   -                   -"
+  "refinery rig"
 )
 # The files the loop reads through paths it builds from each agent's name.
 # run-tests --affected selects a suite only by a path it names, so they are
 # named here, and the loop fails on a file it reads that this list leaves out.
 READS=(
-  agents/witness/prompt.template.md formulas/mol-witness-patrol.toml
-  agents/deacon/prompt.template.md formulas/mol-deacon-patrol.toml
   agents/refinery/prompt.template.md
 )
 
 for SPEC in "${AGENTS[@]}"; do
-  read -r AGENT SCOPE POUR_OK POUR_FAIL BURNS_CURRENT <<<"$SPEC"
+  read -r AGENT SCOPE <<<"$SPEC"
   TITLE="mol-$AGENT-patrol"
-  # A per-rig agent (witness, refinery) runs with GC_RIG set and a rig-prefixed
-  # assignee. The deacon is a city singleton: GC_RIG arrives unset and its
-  # assignee carries no rig segment — the exact shape its reconcile must handle
-  # and the shape a rig-scoped sweep silently drops.
-  if [ "$SCOPE" = city ]; then
-    AGENT_RIG=""
-    AGENT_ID="bind.$AGENT"
-  else
-    AGENT_RIG="$THIS_RIG"
-    AGENT_ID="$THIS_RIG/$AGENT-1"
-  fi
+  AGENT_RIG="$THIS_RIG"
+  AGENT_ID="$THIS_RIG/$AGENT-1"
   PROMPT="$ROOT/agents/$AGENT/prompt.template.md"
-  TOML="$ROOT/formulas/$TITLE.toml"
   echo
   echo "== $AGENT =="
 
   NEEDS="${PROMPT#"$ROOT"/}"
-  [ "$POUR_OK" = - ] || NEEDS="$NEEDS ${TOML#"$ROOT"/}"
   for F in $NEEDS; do
     case " ${READS[*]} " in
       *" $F "*) ok "$AGENT: READS names $F" ;;
@@ -345,30 +257,17 @@ for SPEC in "${AGENTS[@]}"; do
   done
 
   RECONCILE="$(extract patrol-wisp-reconcile "$PROMPT")"
-  POUR=""
-  [ "$POUR_OK" = - ] || POUR="$(extract patrol-wisp-pour "$TOML")"
 
   [ -n "$RECONCILE" ] \
     && ok "$AGENT: reconcile extracted between patrol-wisp-reconcile markers" \
     || bad "$AGENT: reconcile extraction EMPTY — markers missing from $PROMPT"
-  if [ "$POUR_OK" != - ]; then
-    [ -n "$POUR" ] \
-      && ok "$AGENT: pour guard extracted between patrol-wisp-pour markers" \
-      || bad "$AGENT: pour extraction EMPTY — markers missing from $TOML"
-  fi
 
   printf '%s\n' "$RECONCILE" > "$TMP/reconcile.sh"
-  printf '%s\n' "$POUR"      > "$TMP/pour.sh"
-  # The snippets are read as instructions by an agent, but they must still be
+  # The snippet is read as instructions by an agent, but it must still be
   # runnable shell — a syntax error ships a broken instruction.
   bash -n "$TMP/reconcile.sh" \
     && ok "$AGENT: extracted reconcile is syntactically valid bash" \
     || bad "$AGENT: extracted reconcile failed bash -n"
-  if [ "$POUR_OK" != - ]; then
-    bash -n "$TMP/pour.sh" \
-      && ok "$AGENT: extracted pour guard is syntactically valid bash" \
-      || bad "$AGENT: extracted pour guard failed bash -n"
-  fi
 
   # --- Reconcile. ------------------------------------------------------------
   eq "$(run_reconcile "$(fx "$FX_LEAK")")" "w-run|w-orph" \
@@ -414,32 +313,8 @@ for SPEC in "${AGENTS[@]}"; do
 
   eq "$(run_reconcile '[]')" "|" "$AGENT: empty store yields no wisp and no burn"
 
-  # Only the witness defers its successor. A session restarted inside the hour
-  # adopts that successor rather than pouring a second chain, and one stopped
-  # between its defer and its burn adopts the successor and burns the cycle.
-  if [ "$AGENT" = witness ]; then
-    eq "$(run_reconcile "$(fx "$FX_DEFERRED_ONLY")")" "w-next|" \
-       "$AGENT: REGRESSION: a lone deferred successor is adopted, not poured around"
-    eq "$(run_reconcile "$(fx "$FX_DEFERRED_SUCCESSOR")")" "w-next|w-done" \
-       "$AGENT: REGRESSION: adopts the deferred successor and burns the completed cycle"
-    # CONTROL: without the deferred listing the lone successor is invisible, and
-    # the startup block goes on to pour a second chain beside it.
-    grep -v -- '--status=deferred' "$TMP/reconcile.sh" > "$TMP/reconcile-nodeferred.sh"
-    if cmp -s "$TMP/reconcile.sh" "$TMP/reconcile-nodeferred.sh"; then
-      bad "$AGENT: control did not drop the deferred listing — its shape changed, re-check the grep"
-    else
-      eq "$(run_reconcile "$(fx "$FX_DEFERRED_ONLY")" "$TMP/reconcile-nodeferred.sh")" "|" \
-         "$AGENT: CONTROL: without the deferred listing a restart inside the hour finds no wisp"
-    fi
-  fi
-
-  # Cross-rig scoping is only the per-rig agents' concern. The witness and
-  # refinery coexist across rigs in one store, so each must leave a foreign
-  # rig's wisp alone. The city-singleton deacon has no sibling and no rig, so
-  # it has no cross-rig case; its regression is the FX_LEAK check above run
-  # with GC_RIG unset and a rig-less assignee — the shape a rig sweep drops —
-  # where it keeps its own in_progress wisp instead of stranding it to adopt
-  # the orphan.
+  # The refinery coexists across rigs in one store, so it must leave a foreign
+  # rig's wisp alone.
   if [ "$SCOPE" = rig ]; then
     # A foreign rig's patrol wisp in the shared store is neither kept as the
     # survivor nor burned — this rig's in_progress wisp survives and its orphan
@@ -452,92 +327,6 @@ for SPEC in "${AGENTS[@]}"; do
     # no assignee segment to read: a foreign gc.rig is skipped, this rig's adopted.
     eq "$(run_reconcile "$(fx "$FX_CROSS_RIG_ORPHAN")")" "w-mine|" \
        "$AGENT: REGRESSION: a foreign gc.rig orphan is skipped; this rig's gc.rig orphan is adopted"
-  fi
-
-  # The deacon's wisps live in the city store, and its shell can stand in a rig
-  # checkout whose own store holds none of them (mechanism 4). RUN_AMBIENT is
-  # that rig store, empty here.
-  if [ "$SCOPE" = city ]; then
-    printf '[]' > "$TMP/ambient.json"
-    eq "$(RUN_AMBIENT="$TMP/ambient.json" run_reconcile "$(fx "$FX_LEAK")")" "w-run|w-orph" \
-       "$AGENT: REGRESSION: from a rig checkout the reconcile still reads the city store"
-
-    # CONTROL: without --city the reconcile reads the rig store, finds no wisp,
-    # and the startup block goes on to pour one into that store.
-    sed 's/ --city="\$GC_CITY_PATH"//' "$TMP/reconcile.sh" > "$TMP/reconcile-ambient.sh"
-    if cmp -s "$TMP/reconcile.sh" "$TMP/reconcile-ambient.sh"; then
-      bad "$AGENT: control did not strip --city from the reconcile — its shape changed, re-check the sed"
-    else
-      eq "$(RUN_AMBIENT="$TMP/ambient.json" run_reconcile "$(fx "$FX_LEAK")" "$TMP/reconcile-ambient.sh")" "|" \
-         "$AGENT: CONTROL: an unpinned reconcile from a rig checkout finds no wisp"
-    fi
-
-    # The startup pour sits outside the reconcile markers, so its line is read.
-    eq "$(grep -F "gc bd mol wisp $TITLE " "$PROMPT" | grep -c -- '--city="$GC_CITY_PATH"' || true)" "1" \
-       "$AGENT: the startup pour names the city store"
-  fi
-
-  if [ "$POUR_OK" != - ]; then
-    # --- Pour guard. -----------------------------------------------------------
-    eq "$(run_pour 0 0 0 w-cur)" "$POUR_OK" \
-       "$AGENT: happy path: pours and assigns the new wisp"
-
-    # THE CORE GUARD: a failed assign must roll the pour back and report failure,
-    # so the current wisp is never burned. Leaking w-new here IS the bug.
-    eq "$(run_pour 1 0 0 w-cur)" "$POUR_FAIL" \
-       "$AGENT: REGRESSION: a failed assign rolls the poured wisp back, exits non-zero, and burns no current wisp"
-
-    # A pour that yields no id must not be assigned, must not be burned, and must
-    # still stop the current wisp from being burned.
-    eq "$(run_pour 0 1 0 w-cur)" "1||" \
-       "$AGENT: an empty pour exits non-zero without assigning or burning"
-
-    # Rollback is best-effort: if the burn also fails, the guard still exits
-    # non-zero. The stray is then the title-scoped reconcile's problem — which is
-    # exactly why that half of the fix has to be assignee-blind.
-    eq "$(run_pour 1 0 1 w-cur)" "$POUR_FAIL" \
-       "$AGENT: a failed rollback burn still exits non-zero (reconcile is the backstop)"
-
-    # --- Resolving the CURRENT wisp, for the snippet that burns it itself. ------
-    if [ "$BURNS_CURRENT" = "yes" ]; then
-      # GC_BEAD_ID is empty on every fresh session, so the fallback query is the
-      # live path, not a spare. It must find OUR patrol wisp: not the unowned
-      # same-title orphan (reconcile's job, not this step's), and not our
-      # in-progress non-patrol molecule.
-      eq "$(run_pour 0 0 0 "" "$(fx "$FX_CURRENT")")" "$POUR_OK" \
-         "$AGENT: REGRESSION: with GC_BEAD_ID unset the fallback resolves our own patrol wisp and burns it"
-
-      # CONTROL, so the assertion above cannot pass for the wrong reason: put the
-      # pre-fix query shape back and watch the same fixture leak. `--type=wisp` is
-      # refused by bd, so the current wisp never resolves — the next wisp is
-      # poured and assigned, and the old one is left behind. That is the leak.
-      sed 's/--type=molecule --include-infra --limit=0/--type=wisp --limit=1/' \
-        "$TMP/pour.sh" > "$TMP/pour-mutated.sh"
-      if cmp -s "$TMP/pour.sh" "$TMP/pour-mutated.sh"; then
-        bad "$AGENT: control did not mutate the fallback query — its shape changed, re-check the sed"
-      else
-        eq "$(run_pour 0 0 0 "" "$(fx "$FX_CURRENT")" "$TMP/pour-mutated.sh")" "1||${POUR_OK##*|}" \
-           "$AGENT: CONTROL: the pre-fix --type=wisp fallback leaves the current wisp unburned"
-      fi
-    fi
-  fi
-
-  # The pour block from a rig checkout: its fallback still finds the current
-  # wisp in the city store, and the next wisp lands there.
-  if [ "$SCOPE" = city ]; then
-    eq "$(RUN_AMBIENT="$TMP/ambient.json" run_pour 0 0 0 "" "$(fx "$FX_CURRENT")")" "$POUR_OK" \
-       "$AGENT: REGRESSION: from a rig checkout the pour block resolves and burns the city-store wisp"
-    eq "$(paste -sd, - < "$TMP/poured")" "city" \
-       "$AGENT: REGRESSION: from a rig checkout the next wisp is poured into the city store"
-    sed 's/ --city="\$GC_CITY_PATH"//' "$TMP/pour.sh" > "$TMP/pour-ambient.sh"
-    if cmp -s "$TMP/pour.sh" "$TMP/pour-ambient.sh"; then
-      bad "$AGENT: control did not strip --city from the pour block — its shape changed, re-check the sed"
-    else
-      eq "$(RUN_AMBIENT="$TMP/ambient.json" run_pour 0 0 0 "" "$(fx "$FX_CURRENT")" "$TMP/pour-ambient.sh")" "1||w-new" \
-         "$AGENT: CONTROL: an unpinned pour block from a rig checkout cannot resolve the current wisp"
-      eq "$(paste -sd, - < "$TMP/poured")" "ambient" \
-         "$AGENT: CONTROL: an unpinned pour from a rig checkout lands in the rig store"
-    fi
   fi
 
   # --- Static guard: wisp-query invariants over every fenced block. ----------
@@ -561,13 +350,7 @@ for SPEC in "${AGENTS[@]}"; do
   eq "${TITLED:-0}" "${TOTAL:-0}" "$AGENT: every wisp query is still scoped to $TITLE"
   eq "${INFRA:-0}"  "${TOTAL:-0}" "$AGENT: every wisp query still carries --include-infra"
   RIGGED=$(printf '%s\n' "$Q" | grep -c -- "GC_RIG" || true)
-  if [ "$SCOPE" = rig ]; then
-    eq "${RIGGED:-0}" "${TOTAL:-0}" "$AGENT: every wisp query is rig-scoped (passes \$GC_RIG to jq)"
-  else
-    eq "${RIGGED:-0}" "0" "$AGENT: no wisp query is rig-scoped (the city singleton matches by title alone)"
-    CITIED=$(printf '%s\n' "$Q" | grep -c -- '--city="$GC_CITY_PATH"' || true)
-    eq "${CITIED:-0}" "${TOTAL:-0}" "$AGENT: every wisp query names the city store"
-  fi
+  eq "${RIGGED:-0}" "${TOTAL:-0}" "$AGENT: every wisp query is rig-scoped (passes \$GC_RIG to jq)"
 done
 
 echo

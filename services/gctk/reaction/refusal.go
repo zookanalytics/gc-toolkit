@@ -69,11 +69,9 @@ var (
 			"work in flight.")
 )
 
-// standingKinds are the task kinds of a standing record, open by design and
-// never closed, on which a first reaction has no disposition to make. They copy
-// the kinds assets/scripts/standing-kinds.sh defines for the scripts, which
-// TestTheStandingKindsAreTheOnesTheScriptsDefine holds them to, and they leave
-// with those kinds.
+// standingKinds are the task kinds of a standing record, open by design, on
+// which a first reaction has no disposition to make: a triage bucket. Nothing
+// files one any more, and each one left open is settled by hand.
 var standingKinds = []string{"triage-subject"}
 
 // feedbackPattern is the task kind of a feedback pattern, which the feedback

@@ -6,7 +6,7 @@ description: Use when the operator explicitly asks to set, view, suggest, or rot
 # Session Title
 
 Set, view, suggest, or auto-rotate the title for the current session.
-Applies to **canonical agents** (mechanik, deacon) and to any ad-hoc
+Applies to **canonical agents** (the mechanik) and to any ad-hoc
 session the operator spawns. The title shows up in `gc session list`,
 the operator's session popup, and the dashboard, so a descriptive title
 helps the operator see at a glance what the session is on.
@@ -161,7 +161,7 @@ section cross-references rather than duplicating.
 
 ### Canonical mode
 
-Canonical agents (mechanik, deacon) **rotate** their title as focus
+Canonical agents (the mechanik) **rotate** their title as focus
 shifts. The role-name default gives the operator no signal beyond "this
 agent is alive"; a rotating focus title — `skill rename audit`,
 `gc-toolkit PR #60 review triage` — makes `gc session list` scannable.

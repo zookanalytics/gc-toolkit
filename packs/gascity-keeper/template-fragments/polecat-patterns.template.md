@@ -60,11 +60,6 @@ Two-rule policy:
 successor has already replaced `metadata.branch`. That creates a
 parallel-history conflict.
 
-This is a refinement of the witness orphan-recovery formula's
-recovery cases — those assume no successor in flight. With a
-successor active, the formula's "push to branch" step is no
-longer the right move.
-
 ### Refinery PR-handoff contract
 
 When the refinery closes an impl bead with metadata

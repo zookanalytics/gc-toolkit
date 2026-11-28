@@ -39,7 +39,7 @@ export interface Doctor {
   ran: boolean;
   /**
    * Started and Finished bound the run. Late is whether it started more than
-   * two hours before the read, twice the doctor order's hourly cadence: doctor
+   * eight hours before the read, twice the doctor order's four-hour cadence: doctor
    * cannot report that it stopped, so a run that is late is the sign.
    */
   started?: string;

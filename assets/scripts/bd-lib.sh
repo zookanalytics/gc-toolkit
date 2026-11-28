@@ -184,8 +184,7 @@ bd_cache_clear() {
 
 # _bd_call <gc-bd-args...> — the `gc bd` call bd_list, the human gate reads and
 # the anchor-graph reads make. A script that pins its reads to one store
-# redefines it after sourcing this file (liveness-sweep.sh adds its --db pin and
-# per-call time bound), and those reads follow the pin.
+# redefines it after sourcing this file, and those reads follow the pin.
 _bd_call() { gc bd "$@"; }
 
 # bd_list <gc-bd-list-args...> — a guarded array read. --limit=0 so a
@@ -246,7 +245,7 @@ bd_human_gates() {
 }
 
 # $HUMAN_GATE_JQ — the one rule of which human gates still hold the bead they
-# block, as jq defs in the in-variable convention standing-kinds.sh describes,
+# block, as jq defs in the in-variable convention dispatch-path.sh describes,
 # so every reader prepends the same text. A human gate holds in every status but
 # closed, pinned included, because only its resolve clears the question it asks;
 # gctk's pr status reads a gate the same way. The defs:

@@ -83,7 +83,7 @@ cat > "$WISPS_FILE" <<'JSON'
   {"id":"hq-esc-2",            "issue_type":"message","status":"open","assignee":"human","title":"ESCALATION: Reaper anomalies detected [MEDIUM]","created_at":"2026-09-25T00:00:00Z"},
   {"id":"hq-esc-3",            "issue_type":"message","status":"open","assignee":"human","title":"ESCALATION: Reaper anomalies detected [MEDIUM]","created_at":"2026-09-29T00:00:00Z"},
   {"id":"hq-esc-solo",         "issue_type":"message","status":"open","assignee":"human","title":"ESCALATION: Different condition [LOW]","created_at":"2026-09-28T00:00:00Z"},
-  {"id":"hq-boot",             "issue_type":"message","status":"open","assignee":"human","title":"BOOT_HEALTH: deacon cold"}
+  {"id":"hq-boot",             "issue_type":"message","status":"open","assignee":"human","title":"SEAT_PROGRESS: witness stalled"}
 ]
 JSON
 

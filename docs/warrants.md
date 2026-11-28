@@ -142,7 +142,7 @@ no warrant.
   `.gc/worktrees/<rig>/artifacts/worktrees/<bead>` and records it as
   `artifact_dir`, rebases a rejected branch, and at the handoff detaches the tree
   and deletes its branch.
-- **Verified.** 2026-11-26, at `gastownhall/gascity` main d38ec7842f8d and
+- **Verified.** 2026-11-27, at `gastownhall/gascity` main 6dce31bbb68e and
   `gastownhall/gascity-packs` main 44b9db7168f6.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished,
   parked and held work and ends a run by cancelling it. `workspace-setup`: no end
@@ -172,7 +172,7 @@ no warrant.
     only by an operator, either with `gc dolt compact --gc-only --only-db`
     against the live server or with the offline `dolt gc` procedure
     (`docs/troubleshooting/dolt-bloat-recovery.md`).
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main 572f981c6.
+- **Verified.** 2026-11-27, at `gastownhall/gascity` main 6dce31bbb68e.
 - **Retires when.** The supervisor wires `DOLT_GC`, and the maintenance doc
   drops its observe-only note.
 
@@ -298,7 +298,7 @@ no warrant.
     `push-branch` and `create-pr` commands write as a GitHub App installation,
     so GitHub holds those writes to the installation's repositories. It scopes
     no agent's own `gh`.
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68 and
+- **Verified.** 2026-11-27, at `gastownhall/gascity` main 6dce31bbb68e and
   `gastownhall/gascity-packs` main 44b9db7168f6. The config reference's
   `[github]` table declares pull-request monitors, whose `authors` allow-list
   scopes the pull requests a monitor acts on, and scopes no agent's writes.
@@ -749,14 +749,16 @@ no warrant.
     nothing reports a run that has finished, so the start titles each pour with
     its token and searches it after an earlier attempt.
   - Upstream tracks the gap as open P1 bugs: #7163, a formula slung onto a
-    blocked bead runs before its blockers close, and #8832, native execution
-    admission loses current input readiness, whose fix is the open PR #8834.
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main 35e0a4c6fc, with
-  #7163, #8832 and PR #8834 open and unmerged.
+    blocked bead runs before its blockers close, whose fix is the open PR
+    #9406, and #8832, native execution admission loses current input
+    readiness, whose fix is the open PR #8834.
+- **Verified.** 2026-11-28, at `gastownhall/gascity` main 6dce31bbb68e, with
+  #7163, #8832, PR #8834 and PR #9406 open and unmerged.
 - **Retires when.** Gas City holds a poured workflow's steps until its input
-  bead is ready (gastownhall/gascity#8832, which PR #8834 fixes, and #7163). The
-  arm then becomes a plain `gc sling <pool> <bead> --on <formula>` at arm time,
-  and the order, the dispatch lock, the title token, the cap and
+  bead is ready (gastownhall/gascity#8832, which PR #8834 fixes, and #7163,
+  which PR #9406 fixes). The arm then becomes a plain
+  `gc sling <pool> <bead> --on <formula>` at arm time, and the order, the
+  dispatch lock, the title token, the cap and
   `doctor/check-armed-dispatch-owed` retire.
 
 ## Feedback patterns
@@ -798,8 +800,8 @@ no warrant.
     --until`), a `blocks` edge onto its follow-up, `bd close`, and `bd reopen`.
     The search is
     [specs/tk-ltcv43q/gas-city-search.md](../specs/tk-ltcv43q/gas-city-search.md).
-- **Verified.** 2026-11-26, at `gastownhall/gascity` main d38ec7842f8d, `gastownhall/beads`
-  main 786241099046 and `gastownhall/gascity-packs` main 44b9db7168f6.
+- **Verified.** 2026-11-28, at `gastownhall/gascity` main 6dce31bbb68e, `gastownhall/beads`
+  main 0c9c8e697843 and `gastownhall/gascity-packs` main 44b9db7168f6.
 - **Retires when.** Gas City ships a loop that decides agents' recurring
   feedback as work, with the evidence each decision rests on.
 
@@ -829,7 +831,7 @@ no warrant.
     each run as one event, whose newest is what doctor found last
     ([the search](../specs/tk-1tfzr71.158/gas-city-search.md#the-doctor-order-gctk-doctor-run-and-its-event)).
     So this entry covers the patrol finding alone.
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68.
+- **Verified.** 2026-11-27, at `gastownhall/gascity` main 6dce31bbb68e.
 - **Retires when.** Gas City ships a keyed problem record: one record per key,
   which a recurrence finds and updates and which stays until it is resolved.
 
@@ -927,7 +929,7 @@ no warrant.
     code implements it.
   - The search is
     [specs/tk-qpnzxnj/gas-city-search.md](../specs/tk-qpnzxnj/gas-city-search.md).
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68.
+- **Verified.** 2026-11-27, at `gastownhall/gascity` main 6dce31bbb68e.
 - **Retires when.** A Gas City release requests a session's turn for its unread
   mail whoever sent it, as #1966 rules. The orders and the verb then retire,
   and each agent they list is woken by Gas City. Before that, once the city

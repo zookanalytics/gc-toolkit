@@ -20,10 +20,9 @@
 #       printed, when origin does not answer or does not carry the branch.
 #
 # Every git call runs through git_remote_run, which runs it as it is. A caller
-# that bounds its calls redefines it after sourcing this file, as
-# liveness-sweep.sh does with its per-call timeout.
+# that bounds its calls redefines it after sourcing this file.
 #
-# Callers: gate-ensure.sh, signoff.sh, liveness-sweep.sh.
+# Callers: gate-ensure.sh, signoff.sh.
 # Test: git-lib.test.sh.
 
 git_remote_run() { "$@"; }

@@ -61,7 +61,7 @@ cat > "$TMP/status.json" <<'EOF'
 {"agents":[
  {"name":"gc-toolkit.refinery","qualified_name":"alpha/gc-toolkit.refinery","scope":"rig","running":true,"suspended":false},
  {"name":"gc-toolkit.witness","qualified_name":"alpha/gc-toolkit.witness","scope":"rig","running":true,"suspended":false},
- {"name":"gc-toolkit.deacon","qualified_name":"gc-toolkit.deacon","scope":"city","running":true,"suspended":false},
+ {"name":"gc-toolkit.mechanik","qualified_name":"gc-toolkit.mechanik","scope":"city","running":true,"suspended":false},
  {"name":"gc-toolkit.polecat-1","qualified_name":"alpha/gc-toolkit.polecat-1","scope":"rig","running":true,"suspended":false},
  {"name":"gc-toolkit.refinery","qualified_name":"gamma/gc-toolkit.refinery","scope":"rig","running":false,"suspended":false},
  {"name":"gc-toolkit.refinery","qualified_name":"beta/gc-toolkit.refinery","scope":"rig","running":true,"suspended":true}]}

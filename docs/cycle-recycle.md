@@ -28,10 +28,7 @@ A handoff the operator asks for is the `handoff` skill's
 (`skills/handoff/SKILL.md`). What becomes of the retiring session's scratch is
 [scratch-reclaim.md](scratch-reclaim.md). The rule against consent UI from any
 heartbeat agent, of which the hook is one instance, is
-`template-fragments/heartbeat-no-consent-ui.template.md`. The overlay's other
-`Stop` hook, which hands the deacon back a turn that ends between patrol
-cycles and does print a block decision, is
-[patrol-continue.md](patrol-continue.md).
+`template-fragments/heartbeat-no-consent-ui.template.md`.
 
 ## Why a hook and not an instruction
 
@@ -50,8 +47,8 @@ follow an instruction fails silently at exactly the moment it is needed.
 At the end of every turn, and before every prompt, the hook, in order:
 
 1. **Self-gates to patrol roles.** It derives the role from the trailing
-   component of `GC_AGENT` and proceeds only for `witness`, `deacon`, and
-   `refinery`. Every other agent — ephemeral polecats, converse sessions,
+   component of `GC_AGENT` and proceeds only for `witness` and `refinery`.
+   Every other agent — ephemeral polecats, converse sessions,
    mechanik — is a no-op, so a focused worker is never recycled
    mid-task.
 2. **Measures context** from the session's own transcript, at a turn's end
@@ -68,9 +65,8 @@ At the end of every turn, and before every prompt, the hook, in order:
    a pack file its prompt or patrol formula comes from changed on disk after
    its first prompt ([Pack drift](#pack-drift)). With neither, the common
    path, the hook exits cheaply.
-5. **Recycles**: it writes a durable HANDOFF mail (`gc handoff`, which also
-   requests the restart for the witness and the deacon), reaps the retiring
-   session's scratch (`scratch-reap.sh --session`, since the recycle abandons
+5. **Recycles**: it writes a durable HANDOFF mail (`gc handoff`), reaps the
+   retiring session's scratch (`scratch-reap.sh --session`, since the recycle abandons
    that tree whole — docs/scratch-reclaim.md), and requests a restart
    (`gc session reset`). Before a prompt it then blocks the prompt once a
    restart is requested ([Before a prompt](#before-a-prompt)).
@@ -86,10 +82,10 @@ agent has actually accumulated.
 ## Pack drift
 
 A patrol session holds text the pack can change under it. Gas City renders
-the role's prompt, fragments included, once, at launch. The session reads its
-patrol formula's steps as it reaches them, and after many iterations it runs
-the commands it remembers, and the scratch scripts it built from older step
-text, rather than the step text in front of it. A change on main reaches the
+the role's prompt, fragments included, once, at launch. A session that runs a
+patrol formula reads its steps as it reaches them, and after many iterations
+it runs the commands it remembers, and the scratch scripts it built from older
+step text, rather than the step text in front of it. A change on main reaches the
 pack checkout when `reconcile-rig-checkouts` fast-forwards it, and Gas City
 restarts no session for it: its drift fingerprint deliberately excludes the
 prompt and reads no formula
@@ -102,9 +98,10 @@ current text.
 For a role, the hook watches its prompt template
 (`agents/<role>/prompt.template.md`), every fragment under
 `template-fragments/`, and its patrol formula
-(`formulas/mol-<role>-patrol.toml`). It reads them in the pack checkout: in
-`GC_RIG_ROOT` when that carries the role's formula, and otherwise in
-`$GC_CITY_PATH/rigs/gc-toolkit`. Every fragment is watched, not only the ones
+(`formulas/mol-<role>-patrol.toml`) when it has one. The refinery runs one,
+and the witness, which answers mail, has none. It reads
+them in the pack checkout: in `GC_RIG_ROOT` when that carries the role's prompt
+template, and otherwise in `$GC_CITY_PATH/rigs/gc-toolkit`. Every fragment is watched, not only the ones
 the role's prompt includes, so a fragment edit restarts each patrol session
 whether or not its prompt includes that fragment. That costs a restart now and
 then, and spares the hook a reader of template includes.
@@ -127,13 +124,10 @@ change inside that window goes unseen until the next one.
 
 ### When it checks, and a session mid-turn
 
-The check runs at every turn's end and before every prompt. The witness and the
-deacon close each patrol cycle at a turn's end, where the check recycles a
-drifted session, or in Gas City's fresh restart onto their next wisp, which
-starts from the current text, so a change reaches them within the cycle it
-lands in. The refinery's turns start from a nudge, and it waits idle between
-them, which is when a change usually lands, so the check before its next prompt
-is the one that reaches it.
+The check runs at every turn's end and before every prompt. The refinery's and
+the witness's turns start from a nudge, and each waits idle
+between them, which is when a change usually lands, so the check before its
+next prompt is the one that reaches it.
 
 A session mid-turn keeps the text it has until that turn ends. The hook never
 ends a turn early, for the reason it defers under an attached operator or a
@@ -145,31 +139,24 @@ that turn's end recycles the session, so its next turn runs the new text.
 Under `--prompt`, a drifted session recycles before the prompt reaches the
 model. The hook sends the HANDOFF mail, which carries the prompt's text,
 requests the restart, and then blocks the prompt, so the old text never acts
-on it. The restarted session starts from the current prompt, adopts its wisp,
-reads its inbox and works its queue.
+on it. The restarted session starts from the current prompt, adopts its wisp
+when it runs one, reads its inbox and works its queue.
 
-The hook blocks the prompt exactly when a restart is requested, and its
-handoff and its reset can each request one:
+The hook blocks the prompt exactly when its reset requests a restart.
+`gc session reset` requests a restart for any session, and it is the only
+request for the refinery and the witness, which are on-demand sessions, because
+`gc handoff` requests a restart only for an always-mode one. The reset signals
+the controller before it writes anything, so a reset that fails has requested
+nothing.
 
-- `gc session reset` requests a restart for any session, and it is the only
-  request for the on-demand refinery. It signals the controller before it
-  writes anything, so a reset that fails has requested nothing.
-- `gc handoff` requests the restart itself for an always-mode session, the
-  witness or the deacon, once it has written the mail. It exits 1 when it then
-  cannot signal the controller, and the request still stands, so its exit
-  status does not tell the hook whether it requested a restart. Its report on
-  stdout does: the line naming the sent mail says `requesting restart` once
-  the request is set, and `restart skipped` when it requests none. A report
-  the hook does not recognize counts as neither.
-
-A restart that either one requested would end a turn let through
-mid-command, so the prompt is blocked even when the other failed. With no
-restart requested, the prompt goes through: a blocked prompt with no restart
+A requested restart would end a turn let through mid-command, so the prompt is
+blocked. With no restart requested, the prompt goes through: a blocked prompt with no restart
 behind it would leave the session idle on the old text, dropping every prompt
 it is sent. The prompt then runs in the old session, and the hook tries the
 recycle again at that turn's end. So that the next session does not act on
 the prompt a second time, the hook archives the HANDOFF that carries it when
-the handoff's report names that mail with the restart skipped.
+the handoff's report on stdout names that mail with the restart skipped. A
+report the hook does not recognize names no mail.
 
 When the handoff fails before its report, the hook cannot tell whether the
 mail was sent. It archives nothing then, and a prompt it blocks may survive
@@ -180,9 +167,8 @@ startup reconcile and inbox stand in for them.
 
 ### Which named sessions it covers
 
-The overlay serves the named sessions that run a patrol formula unattended:
-the refinery, the witness and the deacon. Mechanik, the other named session,
-holds the operator's standing conversation. A restart on a pack change would
+The overlay serves the named sessions that run unattended: the refinery and the
+witness. Mechanik holds the operator's standing conversation. A restart on a pack change would
 end that conversation under the operator, so mechanik takes a change at its
 next restart, which the operator starts (`skills/handoff/SKILL.md`).
 
@@ -196,8 +182,8 @@ recycle when:
 - an **operator is attached** to watch or debug the pane; or
 - the **refinery is mid git-op** — a rebase/merge in progress or a dirty
   tree, in either the refinery's own worktree or the rig's canonical
-  checkout (`GC_RIG_ROOT`). Witness and deacon are idle pollers with no
-  long git operations, so this guard is refinery-only. Untracked files are
+  checkout (`GC_RIG_ROOT`). The witness runs no long git operations, so
+  this guard is refinery-only. Untracked files are
   normal scratch and do not count.
 
 The bias is **uncertain → skip**. Deferring only delays the recycle: the
@@ -276,7 +262,7 @@ than being absolute. The two are different flows:
 |---|---|---|
 | Trigger | context threshold or pack drift, automatic | operator types it |
 | Decides | the hook | the operator |
-| Scope | witness, deacon, refinery | whoever was asked |
+| Scope | witness, refinery | whoever was asked |
 
 `/handoff` is operator-initiated: an agent does not propose it via consent
 UI and does not invoke the skill from internal judgment.
@@ -298,6 +284,7 @@ the startup-discovery fragments handle that case explicitly.
 ## Manual escape hatch
 
 If a patrol agent needs to bail mid-task before the hook's turn-boundary
-check fires, `gc runtime request-restart` is the manual route (these
-sessions are `mode = "always"`, so the controller respawns them). The
-automatic state-capturing recycle is the hook's job, not the agent's.
+check fires, `gc runtime request-restart` is the manual route: the
+controller stops the session and starts it again fresh, a named or pinned
+session included. The automatic state-capturing recycle is the hook's job,
+not the agent's.

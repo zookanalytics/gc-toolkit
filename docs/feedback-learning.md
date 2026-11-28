@@ -336,7 +336,7 @@ changing a repository lives in the polecats' fragment, and it reaches a converse
 sitting through the edit skill, `gc-toolkit.converse-edit`, which has the
 sitting read the polecat class's fragments before its first edit. The classes:
 polecats (polecat, polecat-codex), human (every converse-<model> sitting),
-system (deacon, mechanik, proactive, witness, refinery, keeper). The mechanik
+system (mechanik, proactive, witness, refinery, keeper). The mechanik
 composes neither of its fragments, because its prime has to fit Claude Code's
 10,000-character session-start cap, which
 `assets/scripts/mechanik-prime-cap.test.sh` holds it to. Its prompt instead

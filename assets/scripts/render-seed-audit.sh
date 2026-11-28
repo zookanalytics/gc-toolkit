@@ -32,8 +32,8 @@
 # binary that renders it, and of nothing else.
 #
 # Fidelity is not assumed, it is measured. Against `gc prime` in the operator's
-# live city, seven of nine agents render BYTE-IDENTICAL (refinery, mayor,
-# deacon, converse, mechanik, proactive, keeper); polecat and witness differ by
+# live city, the refinery, mayor, converse, mechanik, proactive and keeper
+# render BYTE-IDENTICAL; polecat and witness differ by
 # one line of 36 KB — the rig checkout path, which in that city happens to be
 # the pack directory itself. Worst case 0.04%.
 # specs/tk-yhwfv.3/seed-audit.md records the table and how to re-run it.

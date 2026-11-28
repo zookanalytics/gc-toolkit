@@ -132,8 +132,8 @@ func TestTheFailingOrder(t *testing.T) {
 	}
 }
 
-// A run is late once it started more than two hours before the read.
-func TestARunIsLateAfterTwoHours(t *testing.T) {
+// A run is late once it started more than eight hours before the read.
+func TestARunIsLateAfterEightHours(t *testing.T) {
 	for _, tc := range []struct {
 		since time.Duration
 		late  bool
@@ -206,9 +206,9 @@ func TestRead(t *testing.T) {
 	}
 }
 
-// readAt is the time TestTheLiveRunsPage reads the fixture's run at: about two
+// readAt is the time TestTheLiveRunsPage reads the fixture's run at: about eight
 // hours and twenty minutes after it started, so the page marks it late.
-var readAt = time.Date(2026, 11, 17, 0, 42, 0, 0, time.UTC)
+var readAt = time.Date(2026, 11, 17, 6, 42, 0, 0, time.UTC)
 
 // The document built from a live city's newest doctor run, the fixture
 // testdata/doctor.ran.json, is the golden testdata/city.json, which the web

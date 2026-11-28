@@ -287,7 +287,7 @@ other bead is held with hold:mayor for the operator's placement sitting
 (docs/steering.md). A route goes to its pool whether or not the pool runs, and
 a route gc sling refuses, as it refuses a pool the city does not configure,
 stops the exit at that sling. A hand-off nothing would offer the bead to is
-refused, and so is a hand-off to the po, the deacon, the witness or the keeper.
+refused, and so is a hand-off to the po, the witness or the keeper.
 
 Each exit's writes keep their order, so the write that dispatches, holds or
 gates the subject comes last, and a re-run of the same call after an exit

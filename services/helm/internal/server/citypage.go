@@ -17,7 +17,7 @@ import (
 // run and no mail, so a write leaves both cached.
 
 // CityPageTTL is how long the city's document is served before the next read
-// reads the event log again. The newest doctor run changes once an hour. An
+// reads the event log again. The newest doctor run changes every four hours. An
 // open page shows a new run at most this long plus its read interval
 // (CITY_REFRESH_MS in web/src/cityboard/CityPage.tsx) after its record.
 const CityPageTTL = 5 * time.Minute

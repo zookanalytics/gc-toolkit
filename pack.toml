@@ -1,7 +1,7 @@
 # gc-toolkit — primary pack for a Gas City city. Native roster, no pack imports.
 #
 # Every agent this pack runs ships under agents/<name>/ (polecat, refinery,
-# witness, deacon, mechanik, po, mayor, polecat-codex, proactive, demo, the
+# witness, mechanik, po, mayor, polecat-codex, proactive, demo, the
 # converse-claude-opus, converse-claude-fable, converse-codex-sol and
 # converse-codex-astra sittings, and the converse-opus, converse-fable and
 # converse-codex templates kept for the sittings already open on them). There is
@@ -58,19 +58,13 @@ overlay_dir = "overlays/work-context"
 
 # Deterministic context recycle for the long-running patrol roles: a Claude
 # Stop hook recycles the session past a 200K input-token threshold
-# (docs/cycle-recycle.md). Gates itself to witness | deacon | refinery. The
-# same overlay carries the deacon's patrol-continue Stop hook, which hands back
-# a turn that ends between patrol cycles (docs/patrol-continue.md).
+# (docs/cycle-recycle.md). Gates itself to witness | refinery.
 [[patches.agent]]
 name = "refinery"
 overlay_dir = "overlays/cycle-recycle"
 
 [[patches.agent]]
 name = "witness"
-overlay_dir = "overlays/cycle-recycle"
-
-[[patches.agent]]
-name = "deacon"
 overlay_dir = "overlays/cycle-recycle"
 
 # One bot account backs every agent's gh token, so an agent can write to any
@@ -145,9 +139,4 @@ mode = "on_demand"
 [[named_session]]
 template = "witness"
 scope = "rig"
-mode = "always"
-
-[[named_session]]
-template = "deacon"
-scope = "city"
-mode = "always"
+mode = "on_demand"

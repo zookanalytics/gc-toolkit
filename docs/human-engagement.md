@@ -771,9 +771,9 @@ holder, so `gc hook --claim` returns the conversation as an existing
 assignment. A sitting whose session was closed cannot replay its transcript.
 Engage starts a new session under the same alias, which a closed session does
 not reserve, and the new session takes the in-progress task as its own. The
-record carries over in the task's and the subject's notes. Nothing in Gas City
-releases a sitting's claim on its own, and the pack's witness recovery skips a
-conversation too, so the alias is the way back in.
+record carries over in the task's and the subject's notes. Gas City leaves a
+sitting's claim in place while its session is open, so the alias is the way
+back in.
 
 **The entry says where the sitting stands.** Gas City records no reason for a
 start or a wake, delivers the same prompt to each, and its claim answers a
@@ -825,10 +825,8 @@ premise has died is resolved `moot:`, and one whose premise holds but needs
 nobody `benign:`, with the reading as the answer. When the conversation's own
 ask has died with it, the sitting appends the reading to the subject's notes
 and closes the conversation with it, posting nothing and stamping no headline.
-A gate's message is written when it is filed, so the sitting runs the re-check
-command a gate names, as the liveness sweep's gate names
-`liveness-recheck.sh`, through the pack's own copy, and its census supersedes
-the message's lists.
+A gate's message is written when it is filed, so the sitting checks its age
+before it prepares from it.
 
 **The hold** is the operator owing an answer later. The sitting keeps its task
 claimed and the session stays, because the converse templates keep
@@ -1284,18 +1282,16 @@ under the key, and each gate Accept would answer there.
 
 A sitting that reaches a conclusion leaves its subject with a `gc.takeaway`,
 a one-line headline of what was settled or what is being waited for. A
-takeaway exempts nothing anywhere in the liveness family —
-`liveness-sweep.sh`, its precheck and `liveness-recheck.sh`. The wait it names
-does, for as long as that wait is live, and every shape the wait takes is a
-rule those scripts already apply: a `blocks` blocker, which
-`takeaway --waiting-on` and a human gate both write, keeps the bead out of
-`bd ready`, the set the sweep classifies; a child reaches the parent-child arm;
-and a `tracks` target reaches its own. A parked subject whose routed work has
-all landed therefore returns as an ordinary unnamed wait in the sweep's batch
-gate on the rig's triage subject, and the takeaway is never cleared: it is the
-record of what the sitting concluded. A subject a sitting's ruling leaves
-waiting on work comes back through the validating closer the sign-off arms
-instead ([The sitting](#the-sitting)), which checks it once that work lands.
+takeaway holds nothing by itself. The wait it names holds the subject for as
+long as that wait is live, through the edge that records it: a `blocks`
+blocker, which `takeaway --waiting-on` and a human gate both write, keeps the
+bead out of `bd ready`. A parked subject whose routed work has all landed is
+ready again, and the board's Work queue lists it under Not scheduled
+([services/helm/README.md](../services/helm/README.md)). The takeaway is never
+cleared: it is the record of what the sitting concluded. A subject a sitting's
+ruling leaves waiting on work comes back through the validating closer the
+sign-off arms instead ([The sitting](#the-sitting)), which checks it once that
+work lands.
 
 **Routed work is wider than the subject's `blocks` edges.**
 `gctk bead takeaway --waiting-on` records a routed wait as a `blocks` edge.
@@ -1338,8 +1334,7 @@ Everywhere else a takeaway carries its wait as an edge: `--waiting-on` for
 work a pool owes, a human gate for what a person owes. A headline written with
 neither the edge nor the flag is a subject parked on a sentence, and
 `doctor/check-wait-is-an-edge` reports it. No agent in the pack writes a
-`triage.hold`; the liveness sweep's disposition menu offers a human gate in its
-place.
+`triage.hold`.
 
 ## How a held sitting ends
 

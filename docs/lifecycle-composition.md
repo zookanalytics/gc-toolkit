@@ -147,11 +147,10 @@ The intended shape is `tk-2cyxo` (in flight):
   idempotent; the actor cannot depend on anyone opening a board.
 - **Scoped to operator-origin subjects** — the set where a human has a standing
   expectation of an answer.
-- **Nothing left to un-mute.** A takeaway no longer suppresses the liveness
-  sweep's stall reporting (`assets/scripts/liveness-sweep.sh`): the wait it names
-  does, through the edge that records it, so a subject whose waiting set has
-  fully closed already returns as an unnamed wait. What the push adds is where
-  it returns to — the subject's own conversation rather than the batch queue.
+- **Nothing left to un-mute.** A takeaway holds nothing by itself: the wait it
+  names does, through the edge that records it, so a subject whose waiting set
+  has fully closed is ready again, under the board's Not scheduled. What the
+  push adds is where it returns to — the subject's own conversation.
 - **Idempotent**, never filing a second conversation while one waits for the
   subject.
 - **Additive.** The takeaway is never cleared; the conversation is filed beside

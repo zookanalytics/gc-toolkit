@@ -26,6 +26,6 @@ you, so you stay parked until a human walks past your pane.
   from you; you never run its handoff/reset sequence by hand.
 - **`/handoff` is operator-initiated** — never proposed via consent UI.
 
-Applies to all heartbeat agents (witness, deacon, refinery); re-enforced at
+Applies to all heartbeat agents (witness, refinery); re-enforced at
 the threshold boundary by the cycle-recycle hook (docs/cycle-recycle.md).
 {{ end }}

@@ -15,7 +15,7 @@
 # edge (gc-helm.sh, conversation_hold_merge).
 #
 # Sourced (never executed). Two forms of the one rule:
-#   $CONVERSATION_JQ        jq defs, the in-variable convention (standing-kinds.sh):
+#   $CONVERSATION_JQ        jq defs, the in-variable convention (dispatch-path.sh):
 #                           prepend them and call
 #                             conversation_alias     the assignee is the alias that
 #                                                    names the task's own id

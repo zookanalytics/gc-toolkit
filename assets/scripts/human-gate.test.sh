@@ -446,36 +446,6 @@ eq "$rc" 0 "a resumed hold exits 0"
 eq "$(creates)" 2 "…filing no second gate"
 has "$out" "gate tk-gate1 holds what waits" "…and finding the gate it filed"
 
-echo "# the deacon's filed gates reach its incident ledger"
-# The helper calls the ledger by sibling path, so it runs from a private copy
-# with a recording gc-deacon-ledger.sh beside it.
-LSUT="$TMP/ledger-sut"; mkdir -p "$LSUT"
-cp "$SUT" "$HERE/bd-lib.sh" "$LSUT/"
-cat > "$LSUT/gc-deacon-ledger.sh" <<'LSTUB'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >> "${STUB_LEDGER_LOG:?}"
-[ -n "${STUB_LEDGER_FAIL:-}" ] && exit 1
-exit 0
-LSTUB
-chmod +x "$LSUT/gc-deacon-ledger.sh" "$LSUT/human-gate.sh"
-export STUB_LEDGER_LOG="$TMP/ledger.log"
-ledger() { cat "$STUB_LEDGER_LOG" 2>/dev/null; }
-reset "$(task tk-a)"; : > "$STUB_LEDGER_LOG"
-GC_AGENT=gc-toolkit.deacon "$LSUT/human-gate.sh" --subject tk-a --key dolt-backup-mycity \
-  --message "manifest is 30h old" >/dev/null 2>&1; rc=$?
-eq "$rc" 0 "filing exits 0 with the ledger wired in"
-eq "$(ledger | grep -c .)" "1" "a filed gate appends exactly one ledger entry"
-has "$(ledger)" "dolt-backup-mycity: manifest is 30h old" "carrying the key and the title"
-has "$(ledger)" "bead:tk-gate1" "and pointing at the gate it filed"
-GC_AGENT=gc-toolkit.deacon "$LSUT/human-gate.sh" --subject tk-a --key dolt-backup-mycity --message m >/dev/null 2>&1
-eq "$(ledger | grep -c .)" "1" "a dedup writes nothing more"
-reset "$(task tk-a)"; : > "$STUB_LEDGER_LOG"
-GC_AGENT=gc-toolkit/gc-toolkit.polecat "$LSUT/human-gate.sh" --subject tk-a --key k --message m >/dev/null 2>&1
-eq "$(ledger | grep -c .)" "0" "a polecat's gate writes nothing to the deacon's ledger"
-reset "$(task tk-a)"; : > "$STUB_LEDGER_LOG"
-STUB_LEDGER_FAIL=1 GC_AGENT=deacon "$LSUT/human-gate.sh" --subject tk-a --key k --message m >/dev/null 2>&1; rc=$?
-eq "$rc" 0 "a ledger failure never changes the exit: the gate is filed either way"
-
 echo
 echo "human-gate.test.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

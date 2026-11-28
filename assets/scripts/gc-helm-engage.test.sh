@@ -781,10 +781,9 @@ eq "$RC" 0 "(CONVID) engaging a queued conversation exits 0"
 has "$CALLED" "session new converse-claude-opus --alias tk-conv --no-attach --json" "(CONVID) spawns converse-claude-opus --alias <conversation> --no-attach"
 eq "$(asg tk-conv)" "gc-toolkit/gc-toolkit.tk-conv" "(BIND) the conversation is assigned to the sitting's qualified alias, the actor its claim runs as"
 has "$CALLED" "bd update tk-conv --if-assignee human --if-status open --unset-metadata gc.session_id --unset-metadata gc.session_name --assignee gc-toolkit/gc-toolkit.tk-conv" "(BIND) …guarded on the holder and the status engage read, the operator's queue and open"
-# Orphan recovery resolves a bead's owner from gc.session_id ahead of its
-# assignee, so a pin an earlier sitting left beside the fresh binding would have
-# it find that sitting dead and take the conversation from the fresh one. The
-# bind drops both pins in the same guarded write.
+# The session pins belong to the assignee and go with it ("The executor
+# identity goes with the assignee", services/gctk/internal/cli/lifecycle.go),
+# so the bind that changes the assignee drops both in the same guarded write.
 bind_write=$(printf '%s\n' "$CALLED" | grep -- '--assignee gc-toolkit/gc-toolkit.tk-conv' || true)
 has "$bind_write" "--unset-metadata gc.session_id --unset-metadata gc.session_name" \
     "(BIND-PINS) …and drops any session pin an earlier sitting left, in the same write"

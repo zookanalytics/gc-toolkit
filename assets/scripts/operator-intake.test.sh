@@ -264,7 +264,7 @@ has "$OUT" "nothing waits on you yet" "(SINGLE) the operator is told nothing wai
 has "$OUT" "--no-react" "(SINGLE) and is told how to get the conversation now"
 
 # --- (REFUSED) a sling Gas City refuses ends in a conversation ---------------
-run no "what should the deacon do about quota parks"
+run no "what should the witness do about quota parks"
 eq "$RC" "0" "(REFUSED) exits 0"
 eq "$(printf '%s\n' "$CALLS" | grep -E '^(gctk|helm (react|open)) ' | cut -d' ' -f1-4 | tr '\n' ' ')" "gctk reaction sling tk-newsub helm open tk-newsub --reason " \
   "(REFUSED) the reaction's sling is tried, with nothing asked before it, and the conversation is filed directly once it fails"

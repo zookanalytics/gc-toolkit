@@ -21,8 +21,7 @@
 # each reader (doctor/check-blocked-work-armed/run.test.sh,
 # doctor/check-step-terminal/run.test.sh,
 # doctor/check-armed-dispatch-owed/run.test.sh,
-# doctor/check-po-queue-only/run.test.sh, liveness-classify.test.sh,
-# liveness-recheck.test.sh).
+# doctor/check-po-queue-only/run.test.sh).
 # Reads the repo only; no gc, no city, no network.
 set -uo pipefail
 
@@ -105,9 +104,7 @@ done
 
 echo "# every reader sources the one definition"
 # Comment lines are left out, so a reader that names the definition in prose
-# but no longer calls it still fails. The liveness classifier is applied by the
-# sweep and its precheck, which compose its program with these defs, so the
-# classifier asks the hold predicate and its composers source the file.
+# but no longer calls it still fails.
 sources() { # <reader> — it exists, sources this file and applies $DISPATCH_PATH_JQ
     local f="$ROOT/$1" code
     if [ ! -f "$f" ]; then bad "(READERS) $1 exists"; return; fi
@@ -129,12 +126,8 @@ asks() { # <reader> <predicate>
 for r in doctor/check-blocked-work-armed/run.sh doctor/check-step-terminal/run.sh; do
     sources "$r"; asks "$r" has_dispatch_path
 done
-for r in assets/scripts/liveness-sweep.sh assets/scripts/liveness-sweep-precheck.sh \
-         assets/scripts/liveness-recheck.sh doctor/check-po-queue-only/run.sh; do
-    sources "$r"
-done
-for r in doctor/check-blocked-work-armed/run.sh assets/scripts/liveness-classify.sh \
-         assets/scripts/liveness-recheck.sh doctor/check-po-queue-only/run.sh; do
+sources doctor/check-po-queue-only/run.sh
+for r in doctor/check-blocked-work-armed/run.sh doctor/check-po-queue-only/run.sh; do
     asks "$r" has_dispatch_hold
 done
 asks doctor/check-po-queue-only/run.sh dispatch_hold_spellings

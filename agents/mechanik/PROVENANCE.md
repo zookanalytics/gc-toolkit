@@ -6,11 +6,11 @@
 
 ## Goals
 
-City-level structural engineer for Gas City itself. Owns agent configuration, formulas, dispatch patterns, quality gates, prompt engineering, operational conventions, and tooling ergonomics. Persistent. Designs and evolves how the city operates while the deacon patrols for health and the cadence orders move the work.
+City-level structural engineer for Gas City itself. Owns agent configuration, formulas, dispatch patterns, quality gates, prompt engineering, operational conventions, and tooling ergonomics. Persistent. Designs and evolves how the city operates while the patrol orders watch its health and the cadence orders move the work.
 
 ## Why we built this
 
-Gas City needs an LLM that thinks in terms of the engine itself, not in terms of the work the engine processes. Mechanik is the structural counterpart to the deacon's runtime patrols.
+Gas City needs an LLM that thinks in terms of the engine itself, not in terms of the work the engine processes. Mechanik is the structural counterpart to the city's runtime patrols.
 
 ## Notes
 

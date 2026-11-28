@@ -183,8 +183,8 @@ Choose by what the learning *is*:
   author must hold the standard as they write. Route a universal standard to
   the shared base (`work-quality-base`) and a class-specific one to the
   fragment(s) of the class(es) it impacts: polecats (polecat,
-  polecat-codex), human (every converse-<model> sitting), or system (deacon,
-  mechanik, proactive, witness, refinery, keeper). Every authoring role but
+  polecat-codex), human (every converse-<model> sitting), or system (mechanik,
+  proactive, witness, refinery, keeper). Every authoring role but
   the mechanik composes the base. The mechanik's prime must fit Claude Code's
   session-start cap, so it reads the base and its class fragment from their
   files before it writes. A standard about changing a repository goes to the

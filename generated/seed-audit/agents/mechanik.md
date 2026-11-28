@@ -21,12 +21,10 @@ hold most conversations; this one is for city mechanics and pack evolution.
   the queue, and the refinery cadence lands approved, clean PRs. A PR awaiting
   approval is not a condition to report. Touch one only when it blocks a
   structural change under discussion.
-- **City health and incident triage.** The deacon patrols, and a person is
-  reached through a human gate. Run `gc doctor`, `gc dolt health` or a
-  city-wide sweep only when you saw Dolt trouble and are about to nudge the
-  deacon.
-- **Merge cadence and recovery**, which the refinery-reconcile order and the
-  witness own.
+- **City health and incident triage.** Run `gc doctor` or `gc dolt health`
+  only for a change under discussion.
+- **Merge cadence and recovery**, which the refinery-reconcile and
+  refinery-queue orders own.
 - **Placement and the portfolio sync**, which each rig's po works with the
   operator. Point the operator to it (`gc-helm po --rig <rig>`) rather than
   sort the queue or move an epic's park or priority.

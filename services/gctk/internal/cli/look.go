@@ -7,12 +7,15 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 )
 
 // A look is a verb an order runs to read the city and record one Gas City
 // event when it finds something: `session progress` and `refinery stuck`. Each
-// prints the same way.
+// prints the same way. With --act, which the order that runs on the look's
+// event passes, the verb reads again and files what it found, and records no
+// event.
 
 // lookHelpEnd closes a look's help: where its record goes and its exits.
 const lookHelpEnd = `The record goes to standard output as the event carries it, and a summary
@@ -23,6 +26,11 @@ exit: 0 every read answered, and the event was recorded when the look found
       1 a read failed or the event was not recorded
       2 usage
       128+N stopped by signal N`
+
+// actHelpEnd closes the help of a look's --act.
+const actHelpEnd = `With --act, the record and each item filed go to standard output as one
+object, the writer's own lines and a summary line to standard error, and the
+exits are the look's, where 1 is also an item the writer failed to file.`
 
 // stopOnSignal returns the context a look runs under, which a SIGTERM or
 // SIGINT this process is sent ends, and release, which stops listening for
@@ -87,6 +95,28 @@ func reportLook(verb string, record any, summary string, found, recorded bool, f
 	}
 	for _, f := range failures {
 		fmt.Fprintf(stderr, "gctk %s: %s\n", verb, f)
+	}
+	if len(failures) > 0 {
+		return exit(1)
+	}
+	return nil
+}
+
+// reportAct prints what an act did on standard output, what each writer it ran
+// printed and a summary line on standard error, and each failure, and returns
+// the act's exit.
+func reportAct(verb string, acted any, filed int, outputs, failures []string, stdout, stderr io.Writer) error {
+	if err := json.NewEncoder(stdout).Encode(acted); err != nil {
+		fmt.Fprintf(stderr, "gctk %s: what it did could not be printed: %v\n", verb, err)
+	}
+	for _, o := range outputs {
+		if o = strings.TrimRight(o, "\n"); o != "" {
+			fmt.Fprintln(stderr, o)
+		}
+	}
+	fmt.Fprintf(stderr, "gctk %s --act: %d filed\n", verb, filed)
+	for _, f := range failures {
+		fmt.Fprintf(stderr, "gctk %s --act: %s\n", verb, f)
 	}
 	if len(failures) > 0 {
 		return exit(1)

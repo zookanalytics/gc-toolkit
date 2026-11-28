@@ -277,9 +277,9 @@ The block's last line, for each exit:
 # the bead ready.
 # A town-repo edit takes gc-toolkit.mechanik. The exit refuses the po, which
 # takes no work by assignment: work no epic holds is routed, and the exit
-# holds what intake does not admit for placement. It refuses the deacon and
-# the witness, which take mail and no bead, and the keeper, which takes no
-# first reaction's bead.
+# holds what intake does not admit for placement. It refuses the witness,
+# which takes mail and no bead, and the keeper, which takes no first
+# reaction's bead.
 "$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition actionable --assign gc-toolkit.mechanik
 
 # blocked — the wait is an EDGE, never prose: an unheld bead is still ready
@@ -508,8 +508,8 @@ one with `--quiet-window`.
   what they said.
 
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
-<!-- Composed after work-quality-base by the system-class roles: deacon,
-     proactive, witness, refinery, and keeper. The mechanik, also in this
+<!-- Composed after work-quality-base by the system-class roles: proactive,
+     witness, refinery, and keeper. The mechanik, also in this
      class, reads this file and work-quality-base before it writes, because
      its prime has no room for them. Holds the authoring standards for that
      class only; universal standards live in work-quality-base. -->
@@ -611,5 +611,5 @@ Your mail budget is **0–1 messages**. Escalate a genuine blocker to the
 witness as `HELP`; everything else is a nudge or a bead note:
 
 ```bash
-gc mail send "${GC_RIG:+$GC_RIG/}gc-toolkit.witness" -s "HELP: <one line>" -m "Issue: <S>, run <root>. Hit: <what the exit or the check said>. Need: <what unblocks it>."
+gc mail send "${GC_RIG:+$GC_RIG/}gc-toolkit.witness" --notify -s "HELP: <one line>" -m "Issue: <S>, run <root>. Hit: <what the exit or the check said>. Need: <what unblocks it>."
 ```

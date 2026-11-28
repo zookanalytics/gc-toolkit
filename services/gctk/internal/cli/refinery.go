@@ -45,17 +45,40 @@ payload holds:
   unread   each rig whose queue, its address, or what holds a handoff past
            the bound did not read, and why, when one did not
 
-` + lookHelpEnd
+With --act, which the refinery-queue-report order passes when the look's event
+fires, it reads the same way, records no event, and files a human gate keyed
+witness-refinery-queue on each stuck handoff, through the pack's human-gate.sh
+in the directory GCTK_SCRIPTS_DIR names. An open gate holds the handoff, so
+the look passes over it until a person answers the gate, and the writer files
+no second gate while one is open, nor for a day after a person answers one
+moot: or benign:. A handoff it files no gate on for that day is not counted as
+filed, and its line says why.
+
+` + lookHelpEnd + "\n\n" + actHelpEnd
 
 func newRefineryStuckCmd(stdout, stderr io.Writer) *cobra.Command {
-	return &cobra.Command{
+	var act bool
+	cmd := &cobra.Command{
 		Use:   "stuck",
 		Short: "find each refinery handoff that has sat unprepared past four hours, held by nothing, and record them as one gc-toolkit.refinery-queue.stuck event",
 		Long:  refineryStuckLong,
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
-			q := &refinery.Queue{City: gascity.New(), Open: ledger.OpenStore, Now: time.Now}
+			city := gascity.New()
+			q := &refinery.Queue{City: city, Open: ledger.OpenStore, Now: time.Now}
 			ctx, release := stopOnSignal()
+			if act {
+				acted := (&refinery.Report{Look: q, Scripts: city.Within(ctx)}).Run(ctx)
+				if sig := release(); sig != 0 {
+					return exit(128 + int(sig))
+				}
+				outputs := make([]string, 0, len(acted.Gated)+len(acted.Quiet))
+				for _, g := range acted.Gated {
+					outputs = append(outputs, g.Output)
+				}
+				outputs = append(outputs, acted.Quiet...)
+				return reportAct("refinery stuck", acted, len(acted.Gated), outputs, acted.Failures, stdout, stderr)
+			}
 			out := q.Run(ctx)
 			if sig := release(); sig != 0 {
 				return exit(128 + int(sig))
@@ -66,4 +89,6 @@ func newRefineryStuckCmd(stdout, stderr io.Writer) *cobra.Command {
 			return reportLook("refinery stuck", out.Record, out.Record.Summary(), len(out.Record.Stuck) > 0, out.Recorded, out.Failures, stdout, stderr)
 		},
 	}
+	cmd.Flags().BoolVar(&act, "act", false, "file a human gate on each stuck handoff, and record no event")
+	return cmd
 }

@@ -2,12 +2,11 @@
 # doctor/check-blocked-work-armed — blocked work carries a dispatch path. A
 # LIVE, unassigned bead that is plainly work (not a review, step or workflow-
 # topology bead, not a standing record or a feedback pattern, and not a merge
-# anchor) and
-# is held out of `bd ready` by an open `blocks` edge must ALSO carry a way to be
-# dispatched once that edge clears: either `gc.routed_to` (a pool queue
-# consumes it, and bd's readiness gates the offer until the blocker closes) or
-# `gc.dispatch_when_ready` (armed, so the deferred-dispatch order's pass
-# slings it the moment bd reports it ready). Both keys come from the one
+# anchor) and is held out of `bd ready` by an open `blocks` edge must ALSO carry
+# a way to be dispatched once that edge clears: either `gc.routed_to` (a pool
+# queue consumes it, and bd's readiness gates the offer until the blocker
+# closes) or `gc.dispatch_when_ready` (armed, so the deferred-dispatch order's
+# pass slings it the moment bd reports it ready). Both keys come from the one
 # definition of a dispatch path, assets/scripts/dispatch-path.sh, which this
 # check sources. A blocked work bead with NEITHER is the "unrouted-and-remember"
 # anti-pattern: when its blocker closes it becomes ready and no queue is offered
@@ -21,23 +20,22 @@
 # graph.v2 pour — open, unassigned, `gc.routed_to` retired by the pour, the exec
 # stamp set — so flagging on a missing route alone would flag in-flight work, and
 # the arm remedy would double-dispatch it. Liveness is consulted before a
-# candidate is flagged: a bead a live run works (assets/scripts/run-lib.sh's map,
-# which assets/scripts/liveness-sweep.sh reads too) is in-flight and exempt; only
-# a bead no live run works is the stranded shape this reports. When a candidate
-# carries the exec stamp and liveness cannot be confirmed, it is reported as
-# unverifiable and never flagged, so an unreadable run is never turned into a
-# double-dispatch.
+# candidate is flagged: a bead a live run works (assets/scripts/run-lib.sh's map)
+# is in-flight and exempt; only a bead no live run works is the stranded shape
+# this reports. When a candidate carries the exec stamp and liveness cannot be
+# confirmed, it is reported as unverifiable and never flagged, so an unreadable
+# run is never turned into a double-dispatch.
 #
 # The other workflow-driven state that legitimately rests unrouted-and-unassigned
 # is the merge anchor: a bead carrying a `merge_result` is driven by the merge
 # cadence and offered by no pool queue (lifecycle/lifecycle.toml — the anchor
 # state is status x merge_result), so it is exempt on that marker.
 #
-# A standing record (a task_kind assets/scripts/standing-kinds.sh lists) rests
-# unrouted and unassigned by design too: nothing ever dispatches it, so a wait
-# it sits behind owes it no dispatch path, and arming one would sling a
-# held-by-design record to a pool the moment its blocker closed. It is exempt on
-# its task_kind, read from that shared definition.
+# A triage bucket (task_kind=triage-subject) is a standing record, which rests
+# unrouted and unassigned by design too: nothing dispatches it, so a wait it
+# sits behind owes it no dispatch path, and arming one would sling it to a pool
+# the moment its blocker closed. It is exempt on its task_kind. Nothing files
+# one any more, and each one left open is settled by hand.
 #
 # So is a feedback pattern (task_kind=feedback-pattern), backlog work the
 # feedback distiller triages. It waits on the follow-up it spawned, or on the
@@ -102,15 +100,6 @@ set -u
 # doctor.toml names the same set.
 WORK_TYPES=" bug feature task chore spike story "
 
-# The standing kinds, from the one definition shared with the liveness sweep.
-# Exposes $STANDING_KINDS_JQ. An unsourceable one warns: without it a standing
-# record would read as stranded work and draw the arm remedy.
-# shellcheck source=../../assets/scripts/standing-kinds.sh
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/standing-kinds.sh" || {
-    echo "cannot determine whether blocked work carries a dispatch path"
-    printf '  - %s\n' "assets/scripts/standing-kinds.sh could not be sourced from this pack, so a standing record cannot be told from stranded work."
-    exit 1
-}
 # What counts as a dispatch path and a dispatch hold, from the one definition
 # shared with check-step-terminal and gc-helm.sh.
 # Exposes $DISPATCH_PATH_JQ. An unsourceable one warns: without it no bead can be
@@ -235,13 +224,13 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     # not a merge anchor; an allowlisted work issue_type, which a gate is not),
     # carrying no dispatch path (has_dispatch_path: no route and no arm), AND
     # not held (has_dispatch_hold: no hold label).
-    cand=$(printf '%s' "$raw" | jq -r --arg allow "$WORK_TYPES" "$STANDING_KINDS_JQ$DISPATCH_PATH_JQ"'
+    cand=$(printf '%s' "$raw" | jq -r --arg allow "$WORK_TYPES" "$DISPATCH_PATH_JQ"'
         .[]? | . as $b
         | ((($b.id // "?") | tostring) | gsub("[[:cntrl:]]"; " ")) as $id
         | ($b.metadata // {}) as $m
         | select(($b.assignee // "") == "")
         | select(($m["task_kind"] // "") != "review")
-        | select(($b | is_standing_kind) | not)
+        | select(($m["task_kind"] // "") != "triage-subject")
         | select(($m["task_kind"] // "") != "feedback-pattern")
         | select(($m["gc.step_ref"] // "") == "")
         | select(($m["gc.kind"] // "") == "")
@@ -263,10 +252,10 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
 
     # Candidates exist, so resolve which of them a LIVE run already works. A
     # slung work bead carries no worker stamp of its own; coverage is a live run
-    # that works the bead (run-lib.sh's map), the resolution liveness-sweep.sh
-    # uses. Computed only when there is something to filter, and left unconfirmed
-    # ($liveness_ok=0) when the runs cannot be read, so a candidate carrying the
-    # exec stamp is warned rather than flagged when coverage cannot be confirmed.
+    # that works the bead (run-lib.sh's map). Computed only when there is
+    # something to filter, and left unconfirmed ($liveness_ok=0) when the runs
+    # cannot be read, so a candidate carrying the exec stamp is warned rather
+    # than flagged when coverage cannot be confirmed.
     worked=" "; liveness_ok=1
     if runs=$(run_lib map rig_bd); then
         while IFS= read -r m; do [ -n "$m" ] && worked="$worked$m "; done \

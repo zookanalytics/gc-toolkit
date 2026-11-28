@@ -358,16 +358,13 @@ handoff that has waited too long. A dead session's work needs no pack order,
 because the session that next claims it resumes in the worktree the bead
 records. The witness
 triages HELP and NOTICE mail, and the mail wakes it. An order runs `gc doctor`
-each hour and records the run, and the board shows the checks that keep
-failing, when doctor last ran, each monitor order's last good run and how
+and records each run, and the board shows the checks that keep failing,
+when doctor last ran, each monitor order's last good run and how
 many messages wait in the `human` mailbox that Gas City's orders send their
 alerts to, which the mayor works through with the operator. Patrol owns
 the warranted Dolt reclaim and suspended-store backup, and the reapers no
 native one covers: scratch and the review workspaces outside
 `.gc/worktrees/`.
-
-The trade: the deacon, boot health, the incident ledger, the liveness census and
-the witness's patrol loop retire (tk-1tfzr71.19).
 
 The witness's reference is Gas Town's witness at gascity-packs 7f86098c04ea, the
 commit the refinery's copy follows. Each remaining difference names its reason
@@ -377,8 +374,6 @@ and what ends it:
   Town's loop that the city keeps run as orders that look and orders that act,
   because code does the work that needs no judgment (conversation tk-9l9pg0x).
   This ends when Gas Town's witness runs its scripted steps outside its session.
-- **Reading our anchors, PR states and conversations.** Our pipeline writes them.
-  This ends as the old review path's retirement (tk-1tfzr71.122) lands.
 - **Findings and human gates in place of mayor mail.** Gas Town's witness mails
   the mayor about emergencies, failures, recovered and handed-off orphans and
   queue health. Here the orders and the witness file findings and human gates,
@@ -466,7 +461,6 @@ bd 1.3.2.
 | Pack machinery | Gas City's primitive | Carried by |
 |---|---|---|
 | the hand-stamped routes in code other members retire, and the rescues that repair them | `gc sling --no-formula`, assignment | the member that retires each, tk-1tfzr71.19 to .22 |
-| `orphan-dispose.sh`'s generic arms | core's orphan-sweep | tk-1tfzr71.19 |
 
 ### Copied boilerplate
 
@@ -535,7 +529,6 @@ approves its design.
 |---|---|---|---|
 | A | tk-1tfzr71.23 | the membership readers on parent-child | partial files |
 | A | tk-1tfzr71.122 | the old review path, once every rig's cutover has moved its PRs onto the pending record: review beads, lane derivation, validation passes, machine findings and their sweeps, `signoff.sh`, `mol-review`, `mol-review-quorum-signoff`, the bring-current guard and audit, the review dismissal, the refinery's merge cadence with its order and its pacing, and the cutover script | 20,698, and the cutover script |
-| B | tk-1tfzr71.174 | the patrols' second landing, once the first (tk-1tfzr71.19) has added the doctor order and the orders that look: the deacon and its doctor runner, boot health, the incident ledger, the liveness census, the witness's patrol loop and its nudge order, the salvage's branch context | 16,081, and `seat-progress.sh` with its test |
 | B | tk-1tfzr71.24 | the board's second data plane and pack-stamped rows, verbs that only call Gas City | partial files |
 | B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, the `board` stub verb | 588 |
 

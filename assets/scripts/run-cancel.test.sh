@@ -498,19 +498,6 @@ reset; close_root
 OUT=$(FAKE_DELETE_RC=1 "$SCRIPT" --root tk-root --reason r 2>&1); RC=$?
 eq "$RC" 1 "leftovers and a failed convoy delete: not ended"
 
-# --ended: the caller read the root as closed and ends only what it left open.
-reset; close_root
-run --root tk-root --reason r --ended
-eq "$RC" 0 "--ended on a closed root: its leftovers are closed"
-has "$(cat "$GC_LOG")" "convoy delete tk-root --force" "--ended: through gascity"
-reset
-run --root tk-root --reason r --ended
-eq "$RC" 2 "--ended on a root that reads live: refused rather than cancelled"
-eq "$(calls)" 0 "--ended on a live root: no cancel is sent"
-hasnt "$(cat "$GC_LOG")" "convoy delete" "--ended on a live root: nothing is closed"
-run --step "$STEP" --reason r --ended
-eq "$RC" 2 "--ended with --step: usage refused"
-
 # ── 8. 404 and the retried failures ──────────────────────────────────────────
 reset '404 {"status":404,"detail":"run not found: tk-root"}'
 run --root tk-root --reason r

@@ -10,7 +10,7 @@ import type { Check, Document, Doctor, Mail, Response as CityResponse } from './
 // city's newest doctor run (internal/cityboard/testdata/city.json), so a
 // change to the read that the page does not follow fails here.
 
-const live: CityResponse = { read_at: '2026-11-17T00:42:00Z', city: golden as unknown as Document };
+const live: CityResponse = { read_at: '2026-11-17T06:42:00Z', city: golden as unknown as Document };
 
 let calls: string[];
 /** The answers the city's read gives, in turn; the last one repeats. */
@@ -110,15 +110,15 @@ describe('the city page', () => {
     expect(text(first.querySelector('.line-3'))).toBe('blocking');
   });
 
-  it('says when doctor last ran, and marks a run over two hours old late', async () => {
+  it('says when doctor last ran, and marks a run over eight hours old late', async () => {
     render(<Page />);
     await loaded();
     const started = when(live.city.doctor.started ?? '');
     const note = screen.getByText(new RegExp(`^Doctor last ran at ${started.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
-    expect(text(note)).toContain('Late: doctor runs every hour, and this run started over two hours ago.');
+    expect(text(note)).toContain('Late: doctor runs every four hours, and this run started over eight hours ago.');
   });
 
-  it('marks no run late inside two hours', async () => {
+  it('marks no run late inside eight hours', async () => {
     cityReads = [() => json(withDoctor({ late: false }))];
     render(<Page />);
     await loaded();

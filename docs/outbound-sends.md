@@ -56,8 +56,8 @@ anything:
   City's `gc ready` serves a deferred bead, so no pool claims a finding.
 - **Off the list of what the operator owes.** No human gate is filed, and no
   reader that offers work or asks the operator takes a finding for demand. The
-  liveness sweep and the proactive scan read only ready work, and the helm
-  board and the doctor checks admit a bead on a mark a finding does not carry,
+  proactive scan reads only ready work, and the helm board and the doctor
+  checks admit a bead on a mark a finding does not carry,
   such as a human gate, a route to the operator, an arm or a merge state.
 - **The agent's own work carries on.** A workaround in our code is that work's
   business, built and reviewed the usual way, and nothing waits on the
