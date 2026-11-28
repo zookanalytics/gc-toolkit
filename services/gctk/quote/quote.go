@@ -135,7 +135,9 @@ type Author struct {
 // Post is one post as a quote holds it. A held post carries its kind and
 // nothing else. Any other carries its id and its URL, its author, when it was
 // posted, a review's state, an inline comment's file, the line it was made on
-// and its thread, and its text in the inert form.
+// and its thread, and its text in the inert form. The file is named as the
+// PR's change names it, which its opener chose, so it is shown as Line shows
+// text.
 type Post struct {
 	Kind     string  `json:"kind"`
 	Held     bool    `json:"held,omitempty"`
@@ -222,7 +224,7 @@ func Of(p *gh.Posted, only string) (Quote, error) {
 	for _, t := range p.Threads {
 		for _, c := range t.Comments {
 			add(KindInline, account(c.Author, c.AuthorType, c.AuthorAssociation),
-				Post{ID: c.ID, URL: c.URL, At: c.CreatedAt, Path: c.Path, Line: c.OriginalLine, Thread: t.ID,
+				Post{ID: c.ID, URL: c.URL, At: c.CreatedAt, Path: Line(c.Path), Line: c.OriginalLine, Thread: t.ID,
 					Resolved: t.Resolved}, c.Body)
 		}
 	}

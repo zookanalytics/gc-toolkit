@@ -354,3 +354,22 @@ func TestTextIsOneBlockNoPostCanClose(t *testing.T) {
 		t.Fatalf("a post closed the block:\n%s", q.Text())
 	}
 }
+
+// TestOfShowsAnInlineCommentsFileInert pins the file an inline comment is made
+// on: the PR's opener names it, so it shows in look-alikes in the post and in
+// the heading the text prints, as a line of a post does.
+func TestOfShowsAnInlineCommentsFileInert(t *testing.T) {
+	p := posted()
+	p.Threads[0].Comments[0].Path = "docs/$(touch x)`id`.md"
+	q, err := Of(p, "discussion_r21")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "docs/＄(touch x)ˋidˋ.md"
+	if len(q.Posts) != 1 || q.Posts[0].Path != want {
+		t.Fatalf("the inline comment's file is not inert: %+v", q.Posts)
+	}
+	if text := q.Text(); !strings.Contains(text, " on "+want+" line 3") || strings.ContainsAny(text, "`$") {
+		t.Fatalf("the heading shows the file raw:\n%s", text)
+	}
+}
