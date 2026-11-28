@@ -497,7 +497,7 @@ source = "@@ROOT@@"
 source = "@@ROOT@@/packs/gascity-keeper"
 [[rigs.patches]]
 agent = "polecat"
-inject_fragments_append = ["rebase-conventions", "polecat-patterns"]
+inject_fragments_append = ["rebase-conventions"]
 EOF
     cat > "$CITY/.gc/site.toml" <<'EOF'
 [[rig]]

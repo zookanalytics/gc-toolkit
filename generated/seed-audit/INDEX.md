@@ -127,7 +127,7 @@ runs to re-prime after compaction.
 | mechanik | `city` | 1 | _none_ |
 | po | `gascity`, `gc-toolkit` | 1 | _none_ |
 | polecat **DIVERGES** | `gc-toolkit` | 2 | _none_ |
-|  | `gascity` | 2 | `rebase-conventions`, `polecat-patterns` |
+|  | `gascity` | 2 | `rebase-conventions` |
 | polecat-codex | `gascity`, `gc-toolkit` | 1 | _none_ |
 | proactive | `gascity`, `gc-toolkit` | 1 | _none_ |
 | refinery | `gascity`, `gc-toolkit` | 1 | _none_ |
