@@ -16,10 +16,10 @@
 # standing record (a task_kind assets/scripts/standing-kinds.sh lists) is a
 # held-by-design escalation host, not work; a bead an open human gate blocks
 # waits on a person's answer, which the board shows; a `debt` label or a
-# `gc doctor:` title is a doctor/tech-debt advisory record. An assigned bead is already claimed, and that covers a
-# conversation, which is always assigned: to `human` in the operator's queue or
-# to its sitting's alias. A human gate is a gate, an infra type. What remains is
-# rig work no worker can reach.
+# `gc doctor:` title is a doctor/tech-debt advisory record. An assigned bead is
+# already claimed, and that covers a conversation, which is always assigned: to
+# `human` in the operator's queue or to its sitting's alias. A human gate is a
+# gate, an infra type. What remains is rig work no worker can reach.
 #
 # The HQ store is $city_path/.beads, where city_path is `gc agent list`'s
 # resolution (GC_CITY_PATH is the fallback). Read-only. Exit 0=OK 1=Warning

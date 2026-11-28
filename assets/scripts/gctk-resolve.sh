@@ -16,7 +16,8 @@
 #
 # Resolution is EXPLICIT: $GCTK_BIN, else the city named by GC_CITY_PATH,
 # GC_CITY or GC_CITY_ROOT — the same precedence the tmux session picker reads,
-# and GC_CITY_PATH is the one the supervisor puts in an agent session — else the city `gc service list --json` reports. The
+# and GC_CITY_PATH is the one the supervisor puts in an agent session — else
+# the city `gc service list --json` reports. The
 # listing is what the merge cadence itself needs: the order runner that execs
 # refinery-reconcile.sh carries no city variable at all (docs/
 # refinery-merge-cadence.md), so an env-only chain would miss the binary on
