@@ -281,9 +281,8 @@ this answers:
   agent when its blocker closes. The refinery takes an integration effort's
   landing bead and its bring-current hand-off, which `integration-effort.md`
   files.
-- **The witness** takes no bead: it runs only for its mail. Send what it must
-  act on as mail, with `--notify`, which asks Gas City for its turn and wakes
-  it when it sleeps:
+- **The witness** takes no bead. Send what it must act on as mail, with
+  `--notify`:
 
   ```bash
   gc mail send <qualified-name> --notify -s "<what it must do>" -m "<the bead, and what to do about it>"

@@ -489,11 +489,10 @@ gc mail send "${GC_RIG:+$GC_RIG/}gc-toolkit.witness" --notify -s "HELP: <one lin
 Hit: <what you hit>. Tried: <what you tried>. Need: <what unblocks it>."
 ```
 
-The witness runs only for its mail, and `--notify` asks Gas City to wake it.
-It unblocks what it can and files the rest as a finding, whose first reaction
-puts it to a person when one is needed, so mailing it is not a slower route to
-a human. It is the route that
-spends a human only when one is required.
+The witness unblocks what it can and files the rest as a finding, whose first
+reaction puts it to a person when one is needed, so mailing it is not a slower
+route to a human. It is the route that spends a human only when one is
+required.
 
 File a human gate yourself when no agent can answer: missing credentials,
 external access, or a decision that is the operator's to make. File it before

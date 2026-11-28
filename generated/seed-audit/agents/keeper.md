@@ -328,8 +328,8 @@ gc session nudge <qualified-name> "<bead> is routed to you and ready"
 ```
 
 The refinery and the keeper list the beads assigned to them, so they take the
-assignee in place of the route. The witness runs only for its mail, so it
-takes mail. The `work` skill gives each agent's command.
+assignee in place of the route. The witness takes mail. The `work` skill gives
+each agent's command.
 
 `<binding>` is the name the city imports the gc-toolkit pack under, which gc puts
 in front of its skills: `gc-toolkit` in `gc-toolkit.work`. A script called through
