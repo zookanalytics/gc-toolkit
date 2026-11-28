@@ -104,9 +104,7 @@ done
 
 echo "# every reader sources the one definition"
 # Comment lines are left out, so a reader that names the definition in prose
-# but no longer calls it still fails. The liveness classifier is applied by the
-# sweep and its precheck, which compose its program with these defs, so the
-# classifier asks the hold predicate and its composers source the file.
+# but no longer calls it still fails.
 sources() { # <reader> — it exists, sources this file and applies $DISPATCH_PATH_JQ
     local f="$ROOT/$1" code
     if [ ! -f "$f" ]; then bad "(READERS) $1 exists"; return; fi

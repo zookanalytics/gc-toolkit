@@ -292,8 +292,8 @@ SCRIPT_PATH=$(readlink -f "$0" 2>/dev/null || echo "$0")
 SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 # The one definition of a conversation's shape: a task that tracks one bead,
 # assigned to `human` or to the alias that names its own id. open, engage and
-# dismiss read conversations by it, as the board and the liveness classifier
-# do. Exposes $CONVERSATION_JQ.
+# dismiss read conversations by it, as the board does. Exposes
+# $CONVERSATION_JQ.
 # shellcheck source=conversation.sh
 . "${GC_CONVERSATION_LIB:-$SCRIPT_DIR/conversation.sh}" \
     || { echo "$PROG: cannot source conversation.sh from $SCRIPT_DIR" >&2; exit 3; }
