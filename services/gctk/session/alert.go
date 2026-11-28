@@ -40,9 +40,9 @@ const (
 	EscalationWindow = 2 * time.Hour
 	// PromptWindow is how far back a pass reads the sessions' pending prompts
 	// and their clears. A prompt's first escalation comes at least twenty
-	// minutes after it appears, so the window reaches the prompt of every seat
-	// whose alert is still owed, and the clear of every prompt the ledger
-	// holds open.
+	// minutes after it appears, so the window reaches back from a seat's
+	// escalation to its prompt, and from a pass to a clear whose own run
+	// failed, for a day.
 	PromptWindow = 24 * time.Hour
 	// AlertDeadline bounds a pass from its start: its wait for the lock, its
 	// reads and its mail. SendBound bounds each message.

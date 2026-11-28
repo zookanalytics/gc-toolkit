@@ -3,9 +3,10 @@
 # answers is seen. Gas City's work ladder holds back a pool seat's nudges while
 # it waits at a prompt for a person, a permission prompt or a question, and
 # escalates the seat with reason nudge_refused after its third refused nudge,
-# then about hourly while the prompt stays up. Nothing in Gas City mails that
-# escalation, so without this order it reaches only the event log and the
-# dashboard. `gctk session prompt-alert --help` states the rule.
+# then about hourly while the prompt stays up. Nothing in Gas City mails the
+# escalation or the prompt, so without this order a stuck prompt shows only in
+# the event log and on the dashboard, to someone already looking.
+# `gctk session prompt-alert --help` states the rule.
 #
 # The event starts the pass and decides nothing. The pass reads the
 # escalations, the sessions' prompts and their clears again, and its ledger

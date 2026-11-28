@@ -185,8 +185,8 @@ Gas City's work ladder holds back the seat's nudges while it waits and
 escalates the seat about hourly. The prompt-alert orders turn that escalation
 into mail: one alert per prompt to `$GC_ESCALATION_RECIPIENT`, by default the
 `human` mailbox, and a copy to the mechanik, then one note to each when the
-prompt clears (`gctk session prompt-alert --help` states the rule). In this
-city the mayor reads `human` in the sittings the operator opens, and the
+prompt clears (`gctk session prompt-alert --help` states the rule). The
+pack's mayor reads `human` in the sittings the operator opens with it, and the
 mechanik reads its copy at its next turn, so the alert reaches the operator at
 their next sitting with either. Nothing in the pack answers or refuses the
 prompt, so a person decides it. The ladder escalates pool seats alone, so a

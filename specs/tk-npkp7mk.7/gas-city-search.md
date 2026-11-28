@@ -197,7 +197,10 @@ state, as the help advises: a ledger of whom each prompt's alert and note have
 reached, under a lock its passes share, in the city's
 `.gc/runtime/packs/gc-toolkit` beside the mail-notify ledger. It still sends
 with `--dedup`, so a send whose ledger write was lost is not sent twice while
-its message is live.
+its message is live. The pack's own keyed record, the patrol finding
+(`assets/scripts/patrol-finding.sh`), keeps a situation as a bead and slings a
+first reaction on it, which makes the prompt work for an agent. The operator
+asked to be told, so the alert is mail.
 
 ## What the published packs hold
 
