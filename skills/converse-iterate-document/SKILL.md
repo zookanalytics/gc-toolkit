@@ -44,10 +44,11 @@ direction.
 - **Keep the big picture yourself.** You hold what is settled, what is open and
   what comes next, and you say so when the whole has moved, so the operator can
   stay on the item in front of them.
-- **Check a claim before you offer it.** A proposal the operator accepts becomes
-  a decision the rework carries. Read what another system does or cannot do at a
-  named commit, and send a call the document rests on to a subagent charged with
-  breaking it.
+- **Check what a proposal rests on before you offer it,** because a proposal
+  the operator accepts becomes a decision the rework carries. Read each call it
+  rests on once, at a named commit where it is about another system: yourself
+  when one lookup settles it, and otherwise through a subagent charged with
+  breaking it, whose findings are the answer.
 - **Record each ruling on the subject when it lands (`converse-settle`, Record),** opening with
   `$(date -u +%Y-%m-%d)`: the direction it sets and why. A quote of the operator
   there is the evidence of what they ruled, not text for the document.
@@ -106,8 +107,8 @@ operator would want to make. Read each line that way:
 - **A line settles its direction.** It can leave the words to the worker, but
   not what the document decides. "Consider", "as appropriate" and "X or Y" with
   both open hand the worker that call, so take it back to the operator.
-- **A fact nobody has settled goes under `VERIFY`,** with where to read it and
-  where the document states it.
+- **A fact a decision rests on that you did not check goes under `VERIFY`,**
+  with where to read it and where the document states it.
 
 The block goes on the subject. When the PR's anchor is another bead, it goes on
 that anchor instead, because the rework's reviewers read it there, so use that
@@ -137,7 +138,7 @@ WHOLE DOCUMENT: <each change that runs through the document, such as a rename, w
 <file>, after <section>: add. <the same, for the new text>
 <file>, <section> (lines <a>-<b>): keep. <only for a section a worker could reasonably change, and why it stays>
 OTHER FILES: <each other file the decisions reach, with the same verbs, and what the PR's summary must say>
-VERIFY: <each fact nobody has settled, where to read it, and where the document states it>
+VERIFY: <each fact a decision rests on that you did not check, where to read it, and where the document states it>
 
 Open questions: none
 BLOCK
