@@ -5,6 +5,8 @@
 # title and body (gctk pr compose --edit). Proves:
 #   - with no PR open, the head is pushed under the lease and the PR opens as a
 #     draft with the composed title and body, then is recorded pending;
+#   - a body composed with no summary region opens no PR and pushes nothing,
+#     and the next pass, whose body carries the region, opens it;
 #   - a PR open on the branch that the city's account opened and the bead never
 #     recorded is adopted: its title is edited, it is returned to draft, the
 #     head is pushed, and it is recorded, with no second PR;
@@ -100,6 +102,27 @@ eq "$(meta a pr_head_sha)" "$HEAD_A" "…at the head the refinery validated"
 eq "$(bstatus a) $(bassignee a)" "blocked " "…and is blocked on it, assigned to nobody, since the refinery's work on it ends"
 hasnt "$(logged gctk)" "--edit" "a new PR needs no edit"
 hasnt "$(logged gctk)" "pr draft" "a PR that opens as a draft needs no return to draft"
+
+echo "# a body composed with no summary region opens no PR, and the next pass opens it"
+fresh
+BEFORE=$(branch_with polecat/ns ns.txt)
+work ns polecat/ns
+main_with ns-later.txt >/dev/null
+prepared ns polecat/ns
+HEAD_NS=$(git -C "$HOME_DIR/worktrees/ns" rev-parse HEAD)
+eq "$([ "$HEAD_NS" != "$BEFORE" ] && echo new)" "new" "the prep merged main that moved, so its prepared head is new"
+STUB_COMPOSE_SUMMARY=needs-gates run --bead ns
+eq "$RC" 1 "a body with no summary region stops the step (exit 1)"
+has "$OUT" "carries no summary region (summary needs-gates), so the PR does not open with it" "…and says why"
+hasnt "$(logged gh)" "pr create" "no PR opens"
+eq "$(tip polecat/ns)" "$BEFORE" "nothing is pushed"
+hasnt "$(logged gctk)" "pr record" "nothing is recorded"
+reset_logs
+run --bead ns
+eq "$RC" 0 "the next pass, whose body carries the summary region, publishes"
+has "$(logged gh)" "pr create --repo zook/rig --base main --head polecat/ns --draft" "…opening the PR as a draft"
+eq "$(tip polecat/ns)" "$HEAD_NS" "…with the head pushed"
+eq "$(meta ns merge_result)" "pull_request_pending" "…and recorded pending"
 
 echo "# a PR the city's account opened and the bead never recorded is adopted"
 fresh

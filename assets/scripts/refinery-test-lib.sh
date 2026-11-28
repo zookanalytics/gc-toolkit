@@ -23,7 +23,9 @@
 #     bead's blocks edge onto it, or finds one of the same reason, and exits
 #     $STUB_ASK_RC with nothing filed when that is set.
 #     The fake `gctk pr compose` names, as riding the owner's PR, each bead whose
-#     landing onto the owner's branch the lifecycle stub logged. With --edit it
+#     landing onto the owner's branch the lifecycle stub logged. It answers the
+#     summary outcome $STUB_COMPOSE_SUMMARY names, written when that is unset,
+#     and for any other outcome a body with no summary region. With --edit it
 #     is the real one's, through $BIN/gctk-real (_rt_gctk_real). The fake gh
 #     answers GitHub's GraphQL as gctk asks it: the read of PR #<n>'s title and
 #     body from $GH_DIR/view_<n>.json, and updatePullRequest, which writes the
@@ -420,8 +422,12 @@ case "$1 $2" in
     riders=$(awk -v t="--set merged_target=$branch " '$1 == "lifecycle" && index($0, " --to merged ") && index($0 " ", t) { print $3 }' "$LOGS/scripts.log" | paste -sd, -)
     body="<!-- gc:pr-summary -->composed for $owner at $head<!-- /gc:pr-summary -->${riders:+
 riding: $riders}"
-    jq -n --arg t "feat: $owner (${owner})" --arg b "$body" \
-      '{title: $t, body: $b, summary: "written", branch_beads: "single", branch_bead_count: 1}' ;;
+    summary="${STUB_COMPOSE_SUMMARY:-written}" beads=single count=1
+    # Any other summary outcome composes no summary region, and the body is the
+    # branch-beads section alone, as a branch of two beads gives it.
+    [ "$summary" = written ] || { body="<!-- gc:branch-beads -->beads on $branch<!-- /gc:branch-beads -->"; beads=written count=2; }
+    jq -n --arg t "feat: $owner (${owner})" --arg b "$body" --arg s "$summary" --arg bb "$beads" --argjson n "$count" \
+      '{title: $t, body: $b, summary: $s, branch_beads: $bb, branch_bead_count: $n}' ;;
   "pr draft")
     exit "${STUB_DRAFT_RC:-0}" ;;
   "review ask")
