@@ -39,15 +39,26 @@ type quoteHub interface {
 var newQuoteHub = func(host string) quoteHub { return gh.NewBounded(host, quoteReadBound) }
 
 // quoteFollowUp files the operator's follow-up for the posts a quote held on
-// the PR at url, number in repo, on the bead that owns it in the store the
-// command runs against, marking each post through hub once its gate is filed
-// (pr.FollowUpHeld), and returns that bead, "" when the store holds none. The
-// gate is filed through human-gate.sh in the pack's scripts directory, which
-// an agent's own call of gctk names in no GCTK_SCRIPTS_DIR, so it is resolved
-// as the definition of feedback resolves it. A variable so a test can record
-// it.
+// the PR at url, number in repo, on the bead that owns it in the store gc
+// routes the command to, and returns that bead, "" when the store holds none.
+// It holds that store's record lock, which the landing order's take holds too,
+// waiting for it as long as any verb other than a run does, and under it quotes
+// the PR again through hub, so it files for the posts no filer has followed up
+// by then, and marks each through hub once its gate is filed
+// (pr.FollowUpHeld). The gate is filed through human-gate.sh in the pack's
+// scripts directory, which an agent's own call of gctk names in no
+// GCTK_SCRIPTS_DIR, so it is resolved as the definition of feedback resolves
+// it. A variable so a test can record it.
 var quoteFollowUp = func(hub quoteHub, url, repo string, number int, held []quote.Held) (string, error) {
-	bead, err := pr.OwnerOf(ledger.New(gcbd.New()), url)
+	db, err := gcbd.New().Route()
+	if err != nil {
+		return "", err
+	}
+	l, err := ledger.Open(db)
+	if err != nil {
+		return "", err
+	}
+	bead, err := pr.OwnerOf(l, url)
 	if err != nil || bead == "" {
 		return bead, err
 	}
@@ -58,7 +69,19 @@ var quoteFollowUp = func(hub quoteHub, url, repo string, number int, held []quot
 	if err := os.Setenv("GCTK_SCRIPTS_DIR", scripts); err != nil {
 		return bead, err
 	}
-	return bead, pr.FollowUpHeld(context.Background(), actGates{rt: gascity.New()}, hub, bead, repo, number, held)
+	read := func() ([]quote.Held, error) {
+		p, err := hub.Posted(repo, number)
+		if err != nil {
+			return nil, err
+		}
+		q, err := quote.Of(p, "")
+		if err != nil {
+			return nil, err
+		}
+		return q.Held(), nil
+	}
+	return bead, pr.FollowUpHeld(context.Background(), db, recordLockWait, actGates{rt: gascity.New()}, hub, read,
+		bead, repo, number, held)
 }
 
 func newGitHubCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -94,10 +117,12 @@ operator gets one human gate for each outside account on the bead that owns the
 PR, under the key outside-post-<login>, which a later read finds open. Once its
 gate is filed or found open, each such post takes the city's EYES, the mark the
 landing order's take leaves on a post it took, and no later read files a gate
-for a post that carries it. A post reaches agents once the operator says what
-it says in a post of their own. On
-any other repository, such as an upstream project's, nothing is held, and the
-block marks all of it as another repository's text.
+for a post that carries it. The follow-up is filed under the store's record
+lock, which the take holds too, and decides on the posts as GitHub holds them
+once the lock is taken, so reads at once file it once. A post reaches agents
+once the operator says what it says in a post of their own. On any other
+repository, such as an upstream project's, nothing is held, and the block marks
+all of it as another repository's text.
 
 With --description it prints the title and the body alone. With --json it
 prints the quote as one JSON object: the repository, the number, the URL,

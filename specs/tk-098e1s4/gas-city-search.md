@@ -62,13 +62,19 @@ the operator through the board.
 
 ## File the follow-up once per account per PR
 
-**Covered by the gate's key.** Gas City has no general upsert. `SendDeduped` in
+**Covered by the store's record lock and the gate's key, which the reader
+composes.** Gas City has no general upsert. `SendDeduped` in
 `internal/mail/beadmail/beadmail.go` drops a repeated mail, and
 `ensureGitHubPRRepairBead` in `cmd/gc/cmd_github.go` keeps one repair bead per
-PR and head for the monitor alone. `human-gate.sh` files one open gate per
-subject and key, so the key `outside-post-<login>` on the owning bead gives one
-follow-up per account per PR, whichever read holds the post first. A cleared
-gate is no open one, so once a post's gate is filed or found open the post takes
-the city's EYES, the mark the landing order's take leaves on a post it took
-(`takenMark` in `services/gctk/pr/marks.go`), and no later read, nor the take,
-files a gate for a post that carries it.
+PR and head for the monitor alone. bd keeps no idempotency at create, so
+`human-gate.sh`, which files one open gate per subject and key, lets two
+writers in the same instant each file one. Every filer of a follow-up, the
+landing order's take and each read, therefore decides and files under the
+store's record lock (`record.Lock` in `services/gctk/pr/record/lock.go`), and
+decides on each post as GitHub holds it once it has the lock. Under the lock
+the key `outside-post-<login>` on the owning bead gives one follow-up per
+account per PR, whichever filer holds the post first. A cleared gate is no
+open one, so once a post's gate is filed or found open the post takes the
+city's EYES, the mark the landing order's take leaves on a post it took
+(`takenMark` in `services/gctk/pr/marks.go`), and no later filer files a gate
+for a post that carries it.

@@ -5,7 +5,9 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
@@ -48,18 +50,53 @@ func TestFollowUpFilesOneGatePerOutsideAccount(t *testing.T) {
 }
 
 // marks records each reaction a read's follow-up leaves, failing on the node
-// fail names.
+// fail names, and answers a read of the held posts again with them as they
+// stand: held with each mark that landed among its reactions.
 type marks struct {
+	mu   sync.Mutex
+	held []quote.Held
 	left []string
 	fail string
 }
 
 func (m *marks) AddReaction(subject, content string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if subject == m.fail {
 		return errors.New("HTTP 502")
 	}
 	m.left = append(m.left, subject+" "+content)
 	return nil
+}
+
+// read is the held posts as GitHub holds them now, each with the marks left on
+// it since.
+func (m *marks) read() ([]quote.Held, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := make([]quote.Held, 0, len(m.held))
+	for _, h := range m.held {
+		h.Reactions = slices.Clone(h.Reactions)
+		for _, l := range m.left {
+			if node, content, _ := strings.Cut(l, " "); node == h.Node && !slices.Contains(h.Reactions, content) {
+				h.Reactions = append(h.Reactions, content)
+			}
+		}
+		now = append(now, h)
+	}
+	return now, nil
+}
+
+// followUpHeld is pr.FollowUpHeld on PR #7 of acme/widgets for tk-1, under a
+// record lock of the test's own, reading the posts again through m.
+func followUpHeld(t *testing.T, dir string, g pr.Gates, m *marks, held []quote.Held) error {
+	t.Helper()
+	m.mu.Lock()
+	if m.held == nil {
+		m.held = held
+	}
+	m.mu.Unlock()
+	return pr.FollowUpHeld(context.Background(), dir, time.Minute, g, m, m.read, "tk-1", "acme/widgets", 7, held)
 }
 
 // A read's follow-up files nothing for a post the city already marked taken or
@@ -68,6 +105,7 @@ func (m *marks) AddReaction(subject, content string) error {
 // operator clears the gate files nothing for them. A post whose gate did not
 // file is not marked, and a mark that did not land is an error naming it.
 func TestFollowUpHeldSkipsMarkedPostsAndMarksTheRest(t *testing.T) {
+	dir := t.TempDir()
 	g, m := &gates{}, &marks{}
 	held := []quote.Held{
 		{Kind: quote.KindConversation, Author: "stranger", URL: prURL + "#issuecomment-1", Node: "IC_1"},
@@ -80,7 +118,7 @@ func TestFollowUpHeldSkipsMarkedPostsAndMarksTheRest(t *testing.T) {
 	if got := len(pr.Owed(held)); got != 2 {
 		t.Fatalf("owed %d posts, want 2", got)
 	}
-	if err := pr.FollowUpHeld(context.Background(), g, m, "tk-1", "acme/widgets", 7, held); err != nil {
+	if err := followUpHeld(t, dir, g, m, held); err != nil {
 		t.Fatal(err)
 	}
 	if got := g.list(); !slices.Equal(got, []string{"tk-1 outside-post-stranger"}) {
@@ -93,17 +131,101 @@ func TestFollowUpHeldSkipsMarkedPostsAndMarksTheRest(t *testing.T) {
 		t.Fatalf("marks left %q", m.left)
 	}
 	g, m = &gates{err: errors.New("human-gate.sh: exit 1")}, &marks{}
-	if err := pr.FollowUpHeld(context.Background(), g, m, "tk-1", "acme/widgets", 7, held[:1]); err == nil ||
-		len(m.left) != 0 {
+	if err := followUpHeld(t, dir, g, m, held[:1]); err == nil || len(m.left) != 0 {
 		t.Fatalf("a gate that did not file read as %v, and left marks %q", err, m.left)
 	}
 	g, m = &gates{}, &marks{fail: "PRR_2"}
-	if err := pr.FollowUpHeld(context.Background(), g, m, "tk-1", "acme/widgets", 7, held[:2]); err == nil ||
+	if err := followUpHeld(t, dir, g, m, held[:2]); err == nil ||
 		!strings.Contains(err.Error(), "pullrequestreview-2") || !slices.Equal(m.left, []string{"IC_1 EYES"}) {
 		t.Fatalf("a mark that did not land read as %v, with marks %q", err, m.left)
 	}
-	if err := pr.FollowUpHeld(context.Background(), g, nil, "tk-1", "acme/widgets", 7, held[:1]); err == nil {
+	if err := pr.FollowUpHeld(context.Background(), dir, time.Minute, g, nil, m.read, "tk-1", "acme/widgets", 7,
+		held[:1]); err == nil {
 		t.Fatal("a follow-up with nothing to mark posts through read as filed")
+	}
+}
+
+// A read decides on each post as GitHub holds it once it has the record lock,
+// not as the quote it printed saw it: a post another filer followed up since
+// carries the city's EYES and files nothing, one deleted since, or no longer
+// held, files nothing, and a read again that fails files nothing and says so.
+func TestFollowUpHeldDecidesOnThePostsAsTheyStand(t *testing.T) {
+	dir := t.TempDir()
+	held := []quote.Held{
+		{Kind: quote.KindConversation, Author: "stranger", URL: prURL + "#issuecomment-1", Node: "IC_1"},
+		{Kind: quote.KindConversation, Author: "gone", URL: prURL + "#issuecomment-2", Node: "IC_2"},
+	}
+	g, m := &gates{}, &marks{held: []quote.Held{{Kind: quote.KindConversation, Author: "stranger",
+		URL: prURL + "#issuecomment-1", Node: "IC_1", Reactions: []string{"EYES"}}}}
+	if err := followUpHeld(t, dir, g, m, held); err != nil {
+		t.Fatal(err)
+	}
+	if len(g.list()) != 0 || len(m.left) != 0 {
+		t.Fatalf("filed %q and marked %q for posts already followed up or gone", g.list(), m.left)
+	}
+	failing := func() ([]quote.Held, error) { return nil, errors.New("gh: HTTP 502") }
+	if err := pr.FollowUpHeld(context.Background(), dir, time.Minute, g, m, failing, "tk-1", "acme/widgets", 7,
+		held); err == nil || !strings.Contains(err.Error(), "did not read the posts again") || len(g.list()) != 0 {
+		t.Fatalf("a read again that failed read as %v, filing %q", err, g.list())
+	}
+}
+
+// racing files a gate as human-gate.sh does, which reads the bead's open gates
+// and then files one, with a window between the two in which another filer
+// can read the same nothing.
+type racing struct {
+	mu    sync.Mutex
+	open  map[string]bool
+	filed []string
+}
+
+func (r *racing) File(_ context.Context, subject, key, _ string) error {
+	r.mu.Lock()
+	open := r.open[subject+" "+key]
+	r.mu.Unlock()
+	if open {
+		return nil
+	}
+	time.Sleep(100 * time.Millisecond)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.open[subject+" "+key] = true
+	r.filed = append(r.filed, subject+" "+key)
+	return nil
+}
+
+func (r *racing) Withdraw(context.Context, string, string, string) error { return nil }
+
+// Two reads of one PR at once, each holding an outside account's post its
+// quote saw unmarked, file one gate between them: each decides and files under
+// the store's record lock, so the second finds the post marked by the first.
+func TestFollowUpHeldFilesOneGateForReadsAtOnce(t *testing.T) {
+	dir := t.TempDir()
+	held := []quote.Held{{Kind: quote.KindConversation, Author: "stranger", URL: prURL + "#issuecomment-1",
+		Node: "IC_1"}}
+	g, m := &racing{open: map[string]bool{}}, &marks{held: held}
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs <- pr.FollowUpHeld(context.Background(), dir, time.Minute, g, m, m.read, "tk-1", "acme/widgets", 7,
+				held)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !slices.Equal(g.filed, []string{"tk-1 outside-post-stranger"}) {
+		t.Fatalf("two reads at once filed %q, want one gate", g.filed)
 	}
 }
 
