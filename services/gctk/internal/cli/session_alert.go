@@ -29,8 +29,10 @@ pass mails each such prompt once, to the escalation recipient and to each agent
 
 It reads gc events --type work.escalated --since 2h. When one of them has
 reason nudge_refused, or the alert ledger holds a prompt still owed mail, it
-reads gc events --type session.pending_cleared --since 24h, and when one has
-that reason, gc events --type session.pending --since 24h too. A prompt is
+reads gc events --type session.pending_cleared with no --since, the newest
+page of clears the log holds, so a later pass reads a clear whose own pass
+failed. When an escalation has that reason, it reads gc events --type
+session.pending --since 24h too. A prompt is
 escalated when it is its session's newest, an escalation of that session came
 after it, and no clear of it came after it. Its alert goes to each recipient it
 has not reached, and once Gas City records its clear, a short note saying how

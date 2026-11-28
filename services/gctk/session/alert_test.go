@@ -179,6 +179,31 @@ func TestTheClearNoteSaysHowThePromptCleared(t *testing.T) {
 	}
 }
 
+// A clear whose own pass failed or never ran is read by the next pass that
+// runs, however long after the clear, and that pass sends its note once.
+func TestAClearIsNotedByTheNextPassHoweverLate(t *testing.T) {
+	c := newAlertCity(t)
+	c.Add(pendingEv(0, "s-1", "tmux-a"), escalationEv(22*time.Minute, "s-1", nudgeRefused))
+	noFailures(t, c.pass(23*time.Minute))
+	c.Add(clearEv(time.Hour, "s-1", "tmux-a", "resolved"))
+	out := c.pass(26 * time.Hour)
+	noFailures(t, out)
+	notes := c.sentSince(2)
+	if got := addresses(notes); !slices.Equal(got, []string{"gc-toolkit.mechanik", "human"}) || !strings.Contains(notes[0].Body, "cleared at 2026-11-23T21:13:42Z, after 1h. ") {
+		t.Fatalf("the pass a day after the clear mailed %+v", notes)
+	}
+	if len(out.Record.Waiting) != 0 {
+		t.Errorf("record %+v", out.Record)
+	}
+	noFailures(t, c.pass(27*time.Hour))
+	if n := len(c.Sends()); n != 4 {
+		t.Errorf("a later pass mailed %q", addresses(c.sentSince(4)))
+	}
+	if led, err := readAlerts(c.state); err != nil || len(led) != 0 {
+		t.Errorf("the ledger holds %v, %v", led, err)
+	}
+}
+
 // An escalation for any reason but nudge_refused is not about a prompt: it
 // mails nothing, and with no incident open the pass reads nothing past the
 // escalations.

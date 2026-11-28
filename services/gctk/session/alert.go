@@ -38,11 +38,10 @@ const (
 	// pass that runs on any event inside the window still sees the escalation
 	// whose own run failed.
 	EscalationWindow = 2 * time.Hour
-	// PromptWindow is how far back a pass reads the sessions' pending prompts
-	// and their clears. A prompt's first escalation comes at least twenty
-	// minutes after it appears, so the window reaches back from a seat's
-	// escalation to its prompt, and from a pass to a clear whose own run
-	// failed, for a day.
+	// PromptWindow is how far back a pass reads the sessions' pending prompts.
+	// A prompt's first escalation comes at least twenty minutes after it
+	// appears, so the window reaches back from a seat's escalation to its
+	// prompt for a day.
 	PromptWindow = 24 * time.Hour
 	// AlertDeadline bounds a pass from its start: its wait for the lock, its
 	// reads and its mail. SendBound bounds each message.
@@ -215,7 +214,13 @@ func (a *PromptAlert) Run(ctx context.Context) AlertOutcome {
 	if len(refused) == 0 && len(led) == 0 {
 		return AlertOutcome{Record: rec, Failures: failures}
 	}
-	clearedEvents, err := a.City.Events(ctx, clearedType, PromptWindow)
+	// The clears are read with no window, so the next pass reads a clear
+	// whose own pass failed or never ran, however late it comes, and sends
+	// that incident's note. With no window gc events answers the newest page
+	// of clears, 500 of them (fetchCityEvents in cmd/gc/cmd_events.go at
+	// gastownhall/gascity 6dce31bbb6), from the city's archived log too, which
+	// its [events.rotation] archive_retain_age keeps.
+	clearedEvents, err := a.City.Events(ctx, clearedType, 0)
 	if err != nil {
 		return AlertOutcome{Failures: append(failures, "the clears of the sessions' prompts did not read, so no prompt was judged: "+err.Error())}
 	}

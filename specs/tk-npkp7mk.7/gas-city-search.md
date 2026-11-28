@@ -195,9 +195,9 @@ ends, and a send that fails failing the run.
 
 **Why it does not hold the alert to one mail as it stands.** The mayor archives
 the `human` mail whose matter is handled (`agents/mayor/prompt.template.md`),
-and a pass re-reads its windows on every escalation and clear, so after an
-archive the next escalation would mail the prompt again, and a clear still in
-the window would mail its note again. So the verb keeps its own last-sent
+and a pass re-reads the events on every escalation and clear, so after an
+archive the next escalation would mail the prompt again, and a clear it reads
+again would mail its note again. So the verb keeps its own last-sent
 state, as the help advises: a ledger of whom each prompt's alert and note have
 reached, under a lock its passes share, in the city's
 `.gc/runtime/packs/gc-toolkit` beside the mail-notify ledger. It still sends
@@ -225,7 +225,12 @@ gascity-packs at 44b9db7168f6 holds no mention of `work.escalated`,
   while no watcher ran gets no `session.pending_cleared`, so its incident stays
   in the ledger and no note goes.
 - **A clear whose run failed.** Its note waits for the next escalation or
-  clear in the city, and is lost if none comes within the day the pass reads.
+  clear in the city. The pass reads the clears with no window, which gc
+  answers with the newest 500 from the log and its archives
+  (`fetchCityEvents` in `cmd/gc/cmd_events.go` at 6dce31bbb6), so the note is
+  lost only if no pass runs before the clear leaves them. This city keeps its
+  archives 168 hours (`archive_retain_age` in its `[events.rotation]`) and
+  records about 15 clears a day, so that takes a week with no pass.
 - **A city's own escalation hook.** A city that overrides `escalate.sh` or
   sets `GC_ESCALATE_SCRIPT` does not have this alert routed through it until
   tk-6521737 is fixed.
