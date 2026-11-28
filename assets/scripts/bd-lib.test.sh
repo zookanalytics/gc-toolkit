@@ -317,7 +317,7 @@ eq "$(printf '%s' "$kids" | jq -r '[ .[] | select(.id == "tk-r2") | .status ] | 
 jq -c 'map(if .id == "tk-r2" then .status = "open" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
 
 # Every read goes through _bd_call, so a script that pins its reads redefines it
-# and the anchor reads follow (review-cutover.sh's --db pin).
+# and the anchor reads follow.
 _bd_call() { printf '%s\n' "$*" >> "$TMP/hook.log"; gc bd "$@"; }
 : > "$TMP/hook.log"
 bd_anchor_children tk-anc "$ALL" >/dev/null

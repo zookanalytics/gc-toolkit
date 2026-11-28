@@ -886,11 +886,10 @@ why a reader must know it, and the work that retires it.
   reads them itself, spelling each key, against rules 1 and 6:
   `bead-context.sh`, the `converse-recheck-premise` skill's close,
   `doctor/check-claim-advancing` and `doctor/check-root-advancing`, which count
-  a headline as a hold on purpose, `doctor/check-wait-is-an-edge`, which reads
-  the headline as a hold marker through `lifecycle/lifecycle.toml`'s `[holds]`,
-  and the liveness recheck, which tk-1tfzr71.174 retires. `gctk lifecycle
-  --takeaway` can also write the keys. So the keys stay registered in
-  `lifecycle/lifecycle.toml`. tk-1tfzr71.216
+  a headline as a hold on purpose, and `doctor/check-wait-is-an-edge`, which
+  reads the headline as a hold marker through `lifecycle/lifecycle.toml`'s
+  `[holds]`. `gctk lifecycle --takeaway` can also write the keys. So the keys
+  stay registered in `lifecycle/lifecycle.toml`. tk-1tfzr71.216
   decides whether the keys retire onto the bead's notes or stay with a warrant,
   and that decision moves these reads onto the domain or retires them with the
   keys.

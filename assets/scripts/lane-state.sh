@@ -5,18 +5,17 @@
 # A lane is one reviewer, named by one check_set member. `green` is a state of
 # the lane, not a claim about a commit: a push creates and closes no bead in the
 # set this reads, so it does not move a lane out of green. This is the one shared
-# helper the merge predicate, pr-open, gate-ensure, pr-facts and the liveness
-# sweep ask, and the helm board mirrors its local backing in Go
+# helper the merge predicate, pr-open, gate-ensure and pr-facts ask, and the
+# helm board mirrors its local backing in Go
 # (services/helm/internal/board/lanes.go), so every reader derives green the
 # same way.
 #
 #   lane-state.sh green --anchor <id> --lane <lane> [--no-remote] [--db <path>]
 #
 # --db pins every store read to that store, for a caller that pins its own
-# reads. bd-lib.sh's reads go through _bd_call, which the pin
-# redefines, and the anchor read the GitHub fallback makes carries it too. The
-# bd_list memo keys an entry by the cwd and the arguments, never the pin, so it
-# stays off under one.
+# reads. bd-lib.sh's reads go through _bd_call, which the pin redefines, and the
+# anchor read the GitHub fallback makes carries it too. The bd_list memo keys an
+# entry by the cwd and the arguments, never the pin, so it stays off under one.
 #
 # green(anchor, lane) holds when a closed review bead backs the lane and no
 # review for the lane is in flight:

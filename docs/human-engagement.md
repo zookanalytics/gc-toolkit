@@ -1286,11 +1286,12 @@ takeaway holds nothing by itself. The wait it names holds the subject for as
 long as that wait is live, through the edge that records it: a `blocks`
 blocker, which `takeaway --waiting-on` and a human gate both write, keeps the
 bead out of `bd ready`. A parked subject whose routed work has all landed is
-ready again, and the board's Work queue lists it under Not scheduled, with the
-other ready work that no hold, route, assignee, arm or live run sends. The
-takeaway is never cleared: it is the record of what the sitting concluded. A subject a sitting's ruling leaves
-waiting on work comes back through the validating closer the sign-off arms
-instead ([The sitting](#the-sitting)), which checks it once that work lands.
+ready again, and the board's Work queue lists it under Not scheduled
+([services/helm/README.md](../services/helm/README.md)). The takeaway is never
+cleared: it is the record of what the sitting concluded. A subject a sitting's
+ruling leaves waiting on work comes back through the validating closer the
+sign-off arms instead ([The sitting](#the-sitting)), which checks it once that
+work lands.
 
 **Routed work is wider than the subject's `blocks` edges.**
 `gctk bead takeaway --waiting-on` records a routed wait as a `blocks` edge.

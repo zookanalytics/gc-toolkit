@@ -167,8 +167,9 @@ if green --anchor tk-anc --lane correctness --no-remote; then ok "unmarked: a cl
 eq "$(grep -c '' "$STUB_DEPS")" 0 "unmarked: …and the read wrote no edge"
 
 # ---------------------------------------------------------------------------
-# --db pins every store read: a caller that reads one store derives the lane from that store, and the bd_list memo, which keys an entry by
-# the cwd and never the pin, stays off under it.
+# --db pins every store read: a caller that reads one store derives the lane
+# from that store, and the bd_list memo, which keys an entry by the cwd and
+# never the pin, stays off under it.
 # ---------------------------------------------------------------------------
 case_store "[$ANCHOR,$(review closed approve recorded)]" rv-1
 : > "$STUB_GC_LOG"

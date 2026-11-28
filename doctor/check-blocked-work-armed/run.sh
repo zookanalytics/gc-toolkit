@@ -21,10 +21,10 @@
 # stamp set — so flagging on a missing route alone would flag in-flight work, and
 # the arm remedy would double-dispatch it. Liveness is consulted before a
 # candidate is flagged: a bead a live run works (assets/scripts/run-lib.sh's map)
-# is in-flight and exempt; only a bead no live run works is the stranded shape this reports. When a candidate
-# carries the exec stamp and liveness cannot be confirmed, it is reported as
-# unverifiable and never flagged, so an unreadable run is never turned into a
-# double-dispatch.
+# is in-flight and exempt; only a bead no live run works is the stranded shape
+# this reports. When a candidate carries the exec stamp and liveness cannot be
+# confirmed, it is reported as unverifiable and never flagged, so an unreadable
+# run is never turned into a double-dispatch.
 #
 # The other workflow-driven state that legitimately rests unrouted-and-unassigned
 # is the merge anchor: a bead carrying a `merge_result` is driven by the merge
@@ -245,9 +245,10 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
 
     # Candidates exist, so resolve which of them a LIVE run already works. A
     # slung work bead carries no worker stamp of its own; coverage is a live run
-    # that works the bead (run-lib.sh's map). Computed only when there is something to filter, and left unconfirmed
-    # ($liveness_ok=0) when the runs cannot be read, so a candidate carrying the
-    # exec stamp is warned rather than flagged when coverage cannot be confirmed.
+    # that works the bead (run-lib.sh's map). Computed only when there is
+    # something to filter, and left unconfirmed ($liveness_ok=0) when the runs
+    # cannot be read, so a candidate carrying the exec stamp is warned rather
+    # than flagged when coverage cannot be confirmed.
     worked=" "; liveness_ok=1
     if runs=$(run_lib map rig_bd); then
         while IFS= read -r m; do [ -n "$m" ] && worked="$worked$m "; done \

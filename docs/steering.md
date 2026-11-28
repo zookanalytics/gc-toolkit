@@ -272,9 +272,9 @@ A hold also lifts these ways:
   bead's arm only once its hold lifts. A bead lifted with nothing else
   written is raw input again unless a first reaction held it: the proactive
   scan reacts to it when intake is on, and the board lists it under Not
-  scheduled until then. A bead a first reaction held keeps that reaction's headline, which
-  keeps the scan off it, so it takes another reaction only when someone asks
-  for one.
+  scheduled until then. A bead a first reaction held keeps that reaction's
+  headline, which keeps the scan off it, so it takes another reaction only when
+  someone asks for one.
 - A close leaves the label on a closed bead, which nothing reads.
 
 `gc bd set-state` cannot lift a hold, because it refuses an empty value. A bead

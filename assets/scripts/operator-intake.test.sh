@@ -344,9 +344,9 @@ unset FAKE_SLING_RC
 
 # --- (KIND) a feedback pattern files the conversation directly
 # the sling returns its fourth no-op code (6) when the subject's kind takes no first
-# reaction: the feedback distiller dispatches a pattern. No reaction will put the topic to the operator, so the
-# conversation is filed directly, its ask naming that cause, not another skip
-# and not a failure to sling.
+# reaction: the feedback distiller dispatches a pattern. No reaction will put
+# the topic to the operator, so the conversation is filed directly, its ask
+# naming that cause, not another skip and not a failure to sling.
 FAKE_SLING_RC=6 run yes "a topic on a feedback pattern"
 eq "$RC" "0" "(KIND) exits 0 — the conversation is filed"
 has "$CALLS" "gctk reaction sling tk-newsub" "(KIND) the sling was attempted"

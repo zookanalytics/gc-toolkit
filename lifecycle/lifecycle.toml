@@ -1601,5 +1601,5 @@ keys = [
 #   disposition unstated. Never cleared.
 # gc.synthetic — "true" on a machine-minted convoy, written by the runtime that
 #   mints it. priority-lib.sh reads it to tell a run's input convoy, which it
-#   follows to the one bead the convoy tracks. The pack does not write it. Absent means the convoy
-#   is not marked synthetic. A boolean-valued string.
+#   follows to the one bead the convoy tracks. The pack does not write it.
+#   Absent means the convoy is not marked synthetic. A boolean-valued string.

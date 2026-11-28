@@ -184,8 +184,7 @@ bd_cache_clear() {
 
 # _bd_call <gc-bd-args...> — the `gc bd` call bd_list, the human gate reads and
 # the anchor-graph reads make. A script that pins its reads to one store
-# redefines it after sourcing this file, as review-cutover.sh does with its --db
-# pin, and those reads follow the pin.
+# redefines it after sourcing this file, and those reads follow the pin.
 _bd_call() { gc bd "$@"; }
 
 # bd_list <gc-bd-list-args...> — a guarded array read. --limit=0 so a
