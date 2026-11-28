@@ -23,9 +23,9 @@
 # through when given and cleared when omitted; the close-mode failures that
 # record the marker but exit non-zero (gh missing, an unreadable state, a
 # conversation gctk github quote does not read, a failed closing comment or gh
-# close); a notice an outside account posts, which the quote holds, passing for
-# none; dry-run writing nothing; and the usage refusals (bad kind, missing
-# args).
+# close); a notice an outside account posts, which the quote holds, or a marked
+# comment that quotes the notice below its first line, passing for none; dry-run
+# writing nothing; and the usage refusals (bad kind, missing args).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -517,10 +517,11 @@ store "[$(anchor A28 98), $(succ S28)]"
 : > "$STUB_GH_LOG"
 OTHER=$(jq -cn '[{body:"Closing as duplicate: disposition recorded on anchor A280 (successor S28).\n\n<!-- gc:city -->"},
                  {body:"Closing as re-homed: disposition recorded on anchor A28 (successor S28).\n\n<!-- gc:city -->"},
-                 {body:"Closing as duplicate: disposition recorded on anchor A28 (successor S28). quoted by hand"}]')
+                 {body:"Closing as duplicate: disposition recorded on anchor A28 (successor S28). quoted by hand"},
+                 {body:"The close will read:\nClosing as duplicate: disposition recorded on anchor A28 (successor S28).\n\n<!-- gc:city -->"}]')
 out=$(STUB_PR_COMMENTS="$OTHER" "$SUT" --anchor A28 --successor S28 --kind duplicate 2>&1); rc=$?
 eq "$rc" 0 "exits 0"
-eq "$(grep -c '^pr comment 98 ' "$STUB_GH_LOG")" "1" "another anchor's notice, another kind's, or an unmarked copy does not count as posted"
+eq "$(grep -c '^pr comment 98 ' "$STUB_GH_LOG")" "1" "another anchor's notice, another kind's, an unmarked copy, or a marked comment that quotes the notice below its first line does not count as posted"
 has "$(cat "$STUB_GH_LOG")" "pr close 98" "…and the PR is closed"
 
 echo "# gh calls follow the anchor's pr_url repo, NOT the checkout origin"

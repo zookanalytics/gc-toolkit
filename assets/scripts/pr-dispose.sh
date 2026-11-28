@@ -311,14 +311,16 @@ if [ "$PR_STATE" = "OPEN" ]; then
   # The comment is posted first and gates the close, so the PR never closes
   # without the reason it was closed for. A re-run after a failed close finds the
   # notice its first run posted, so it closes without posting a second one. The
-  # notice is this disposition's when it carries the same kind and anchor and
-  # the city's mark. The recorded marker cannot stand in for that test: a run
-  # whose comment failed recorded the marker too. The PR's conversation is read
-  # through gctk github quote, where a post the quote holds carries no text, so
-  # an outside account's post cannot pass for the notice. A quote that printed
-  # and then failed to file a held post's follow-up is still the conversation,
-  # and the follow-up is gctk's to file on a later read. A conversation that
-  # does not read could hide the notice, so the PR is not closed.
+  # notice is this disposition's when it opens with the same kind and anchor and
+  # carries the city's mark. The recorded marker cannot stand in for that test: a
+  # run whose comment failed recorded the marker too. The PR's conversation is
+  # read through gctk github quote, where a post the quote holds carries no text,
+  # so an outside account's post cannot pass for the notice, and each line of a
+  # post opens with the quote's bar, so the notice opens with the bar and then
+  # the kind and anchor. A quote that printed and then failed to file a held
+  # post's follow-up is still the conversation, and the follow-up is gctk's to
+  # file on a later read. A conversation that does not read could hide the
+  # notice, so the PR is not closed.
   CMARK=$("$PR_POST" mark 2>/dev/null) || CMARK=""
   gctk=$(gctk_path) || gctk=""
   QUOTE=""
@@ -328,7 +330,7 @@ if [ "$PR_STATE" = "OPEN" ]; then
     || die "the marker is recorded but PR#$PRNUM's conversation could not be read through gctk github quote, so whether it already carries the closing comment is unknown; the PR was NOT closed and is still OPEN — close it by hand (or re-run once gctk works), and $CLOSER disposes $ANCHOR once it reads the PR closed" 1
   POSTED=$(printf '%s' "$QUOTE" | jq -r --arg lead "$CLEAD" --arg mark "$CMARK" '
     [ (.posts // [])[] | select(.kind == "conversation") | ((.text // "") | tostring) as $b
-      | select(($mark != "") and ($b | contains($lead)) and ($b | contains($mark))) ] | length' 2>/dev/null)
+      | select(($mark != "") and ($b | startswith("│ " + $lead)) and ($b | contains($mark))) ] | length' 2>/dev/null)
   case "$POSTED" in ''|*[!0-9]*) POSTED=0 ;; esac
   if [ "$POSTED" -gt 0 ]; then
     echo "$PROG: PR#$PRNUM already carries this disposition's closing comment; closing it without posting another"
