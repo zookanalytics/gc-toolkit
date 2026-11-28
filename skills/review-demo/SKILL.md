@@ -135,8 +135,7 @@ runs no capture.
 Every modality reaches the PR the same way. `demo-deliver.sh --file <path>
 --subject <anchor_bead>` resolves the PR from the anchor and attaches the file
 to it in a comment, inline and uncommitted. It refuses a PR outside the rig's
-origin and exits non-zero when it cannot attach, naming the `gh` it needs when
-that is missing or too old.
+origin and exits non-zero when it cannot attach.
 
 - `video`: record it in this review with `rig-demo-capture.sh --script demo.md
   --output demo.mp4 <app target>`, the rig-demo mol's capture core. Do not pour
@@ -197,7 +196,6 @@ that is missing or too old.
   whether it is narrated.
   Narration needs `OPENAI_API_KEY` in the session. Without it the clip is
   silent and captioned, and it still shows the change.
-  A capture that lacks a tool fails with a message that names the tool.
 
 - `repo-artifact`: list the visuals the reviewed commit already carries.
 

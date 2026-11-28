@@ -405,8 +405,6 @@ needs `OPENAI_API_KEY`. Each is fetched on demand rather than assumed:
   `gc supervisor install` writes that env, as it does any key with an
   AI-provider prefix. Sessions started after that carry the key.
 
-A capture that lacks a tool fails with a message that names the tool.
-
 `VERCEL_AUTOMATION_BYPASS_SECRET`, Vercel's Protection Bypass for Automation
 key, is neither a provider credential nor on gascity's short allowlist, so it
 reaches sessions from the secrets file only when `GC_SUPERVISOR_ENV` names it.
