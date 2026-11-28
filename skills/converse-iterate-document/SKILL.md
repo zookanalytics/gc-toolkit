@@ -36,22 +36,19 @@ think their direction is wrong, and propose what would serve it better, so the
 document beats what either of you would write alone and still carries their
 direction.
 
-- **Start from a read of the document.** Send it to a read-only subagent where
-  one is offered, so the conclusions reach the thread and the file does not. Ask
-  for findings with line references at the commit it read. When the subject's
-  notes hold an earlier scaffold, ask first whether its rework carried it, item
-  by item, and then what fresh eyes find. No review check compares a rework with
-  its scaffold, so this read is the one that does.
+- **Start from a brief of the document,** made as `converse-prep` says, with
+  the operator's ask as its charge.
 - **Put up one item a turn, with your recommendation.** The operator rules on
   it, and you move on. Items of one kind can go up together as a table to
   redline, one row each with your proposed verdict.
 - **Keep the big picture yourself.** You hold what is settled, what is open and
   what comes next, and you say so when the whole has moved, so the operator can
   stay on the item in front of them.
-- **Check a claim before you offer it.** A proposal the operator accepts becomes
-  a decision the rework carries. Read what another system does or cannot do at a
-  named commit, and send a call the document rests on to a subagent charged with
-  breaking it.
+- **Check the claims a proposal rests on before you offer it.** A proposal the
+  operator accepts becomes a decision the rework carries. Check each claim once.
+  When one lookup settles a claim, check it yourself. Otherwise, send it to a
+  subagent charged with breaking it. Its findings are the answer you bring.
+  Either way, a claim about another system is checked at a named commit.
 - **Record each ruling on the subject when it lands (`converse-settle`, Record),** opening with
   `$(date -u +%Y-%m-%d)`: the direction it sets and why. A quote of the operator
   there is the evidence of what they ruled, not text for the document.
@@ -110,8 +107,8 @@ operator would want to make. Read each line that way:
 - **A line settles its direction.** It can leave the words to the worker, but
   not what the document decides. "Consider", "as appropriate" and "X or Y" with
   both open hand the worker that call, so take it back to the operator.
-- **A fact nobody has settled goes under `VERIFY`,** with where to read it and
-  where the document states it.
+- **A fact a decision rests on that you did not check goes under `VERIFY`,**
+  with where to read it and where the document states it.
 
 The block goes on the subject. When the PR's anchor is another bead, it goes on
 that anchor instead, because the rework's reviewers read it there, so use that
@@ -141,7 +138,7 @@ WHOLE DOCUMENT: <each change that runs through the document, such as a rename, w
 <file>, after <section>: add. <the same, for the new text>
 <file>, <section> (lines <a>-<b>): keep. <only for a section a worker could reasonably change, and why it stays>
 OTHER FILES: <each other file the decisions reach, with the same verbs, and what the PR's summary must say>
-VERIFY: <each fact nobody has settled, where to read it, and where the document states it>
+VERIFY: <each fact a decision rests on that you did not check, where to read it, and where the document states it>
 
 Open questions: none
 BLOCK
@@ -177,5 +174,4 @@ description the same way the ruling line does. Send either one as the
 `converse-settle` step says.
 
 A further round is another block and one more rework, and the newest block is
-the one in force. When the operator engages the document again, start again from
-the read above.
+the one in force. Start each further round from a fresh brief.
