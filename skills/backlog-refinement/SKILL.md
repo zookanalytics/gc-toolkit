@@ -98,7 +98,7 @@ its group in view.
 | place under an epic | the work serves the hypothesis of an epic nothing parks | the epic, or its open Delivery whose aim covers the bead |
 | park with its epic | the work belongs to an epic that a park holds, so it waits with that epic | the epic |
 | graduate into a new epic | its group needs an epic of its own, when each condition its check below lists holds | the beads it would hold, and the epic you propose: its handle, hypothesis and boundaries |
-| place on its own | it cannot wait for an epic, in a case its check below lists; say which | nothing |
+| place on its own | it cannot wait for an epic, in a case its check below lists. Say which, in a line of its own | nothing |
 | wait on a bead | it cannot go until something else happens, in a case its check below lists | the bead it waits on, or what the operator owes |
 | ask | it needs the operator's judgment, such as a design or product question, or you cannot tell; put the question in the reason | nothing |
 
@@ -128,9 +128,22 @@ Check before you propose:
   - an emergency that cannot wait for an epic, such as the host going down;
   - work the operator names to run on its own, with where they named it.
 
+  Bring each such bead by itself, as one line that names its case, for the
+  operator's answer to that line alone. It is never part of a set that takes
+  one answer.
+
   That a defect hurts is not enough, since most real defects do. Such a
   defect goes under the epic its outcome belongs to, or into its theme's new
   epic.
+
+  Work that adds something new for someone to use, such as a command or a
+  screen, is never proposed on its own as an emergency. That holds even when
+  it answers a harm. Propose one of these for it instead:
+  - place it under the epic its outcome belongs to;
+  - graduate it into a new epic for its theme;
+  - keep it, as "Close as not needed" says of a bead that nothing would file
+    again;
+  - ask, with the design or product question in the reason.
 - **Wait on a bead:** propose it in one of these cases:
   - it cannot start until another bead lands;
   - another bead's landing may end its job;
@@ -244,7 +257,9 @@ it does.
 
 Apply the piece's rulings through your prompt's levers, let each write's exit
 say whether it landed, and only then bring the next piece. Each ruling's note
-gives the operator's reason in words. When the operator turns down a proposal
+gives the operator's reason in words. The note on a bead placed on its own also
+gives the case its proposal named: the emergency, or where the operator named
+the bead. When the operator turns down a proposal
 that moves no lever, append their reason to that bead's notes, so a later
 sitting reads it before proposing the same again:
 

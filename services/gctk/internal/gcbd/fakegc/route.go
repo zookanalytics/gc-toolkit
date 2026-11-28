@@ -176,7 +176,7 @@ func takeDB(args []string) (string, []string) {
 // create or ready, or for a dep add that reads its edges from a file.
 func subject(verb string, args []string) string {
 	switch verb {
-	case "show", "update", "close", "comment", "comments":
+	case "show", "children", "update", "close", "comment", "comments":
 		return firstID(args)
 	case "dep":
 		switch first(args) {
