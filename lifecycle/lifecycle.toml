@@ -1224,7 +1224,9 @@ keys = [
 # triage.* — triage.scope and triage.last_seen are RETIRED: a triage bucket's
 #   scope and the comma-joined ids in it when its last recurrence was filed,
 #   which the liveness census kept on the buckets it filed under
-#   task_kind=triage-subject. Nothing writes or reads them or the kind.
+#   task_kind=triage-subject. Nothing writes or reads them, and nothing writes
+#   the kind. gctk's first reaction and doctor/check-blocked-work-armed pass
+#   over a bead that carries it, a bucket left open until it is settled.
 #   triage.hold is a hold marker, defined in [holds] (marker_keys). Nothing in
 #   the pack writes it.
 # gc.pr_visit_summary / gc.pr_visit_actions — RETIRED. They were the closing

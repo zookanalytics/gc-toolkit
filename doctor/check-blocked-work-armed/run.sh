@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # doctor/check-blocked-work-armed — blocked work carries a dispatch path. A
 # LIVE, unassigned bead that is plainly work (not a review, step or workflow-
-# topology bead, not a feedback pattern, and not a merge anchor) and is held
-# out of `bd ready` by an open `blocks` edge must ALSO carry a way to be
-# dispatched once that edge clears: either `gc.routed_to` (a pool queue
-# consumes it, and bd's readiness gates the offer until the blocker closes) or
-# `gc.dispatch_when_ready` (armed, so the deferred-dispatch order's pass
-# slings it the moment bd reports it ready). Both keys come from the one
+# topology bead, not a standing record or a feedback pattern, and not a merge
+# anchor) and is held out of `bd ready` by an open `blocks` edge must ALSO carry
+# a way to be dispatched once that edge clears: either `gc.routed_to` (a pool
+# queue consumes it, and bd's readiness gates the offer until the blocker
+# closes) or `gc.dispatch_when_ready` (armed, so the deferred-dispatch order's
+# pass slings it the moment bd reports it ready). Both keys come from the one
 # definition of a dispatch path, assets/scripts/dispatch-path.sh, which this
 # check sources. A blocked work bead with NEITHER is the "unrouted-and-remember"
 # anti-pattern: when its blocker closes it becomes ready and no queue is offered
@@ -30,6 +30,12 @@
 # is the merge anchor: a bead carrying a `merge_result` is driven by the merge
 # cadence and offered by no pool queue (lifecycle/lifecycle.toml — the anchor
 # state is status x merge_result), so it is exempt on that marker.
+#
+# A triage bucket (task_kind=triage-subject) is a standing record, which rests
+# unrouted and unassigned by design too: nothing dispatches it, so a wait it
+# sits behind owes it no dispatch path, and arming one would sling it to a pool
+# the moment its blocker closed. It is exempt on its task_kind. Nothing files
+# one any more, and each one left open is settled by hand.
 #
 # So is a feedback pattern (task_kind=feedback-pattern), backlog work the
 # feedback distiller triages. It waits on the follow-up it spawned, or on the
@@ -214,7 +220,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         continue
     }
     # The predicate, entirely on the listing's own fields: plainly work
-    # (unassigned; not review/feedback-pattern/step/workflow-topology;
+    # (unassigned; not review/standing/feedback-pattern/step/workflow-topology;
     # not a merge anchor; an allowlisted work issue_type, which a gate is not),
     # carrying no dispatch path (has_dispatch_path: no route and no arm), AND
     # not held (has_dispatch_hold: no hold label).
@@ -224,6 +230,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         | ($b.metadata // {}) as $m
         | select(($b.assignee // "") == "")
         | select(($m["task_kind"] // "") != "review")
+        | select(($m["task_kind"] // "") != "triage-subject")
         | select(($m["task_kind"] // "") != "feedback-pattern")
         | select(($m["gc.step_ref"] // "") == "")
         | select(($m["gc.kind"] // "") == "")

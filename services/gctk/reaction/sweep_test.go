@@ -44,11 +44,12 @@ func ids(lines []Swept, outcome string) []string {
 }
 
 // The candidate rule keeps the raw input among the ready beads and drops each
-// bead that is no input: a feedback pattern, a review lane, a route or an arm,
-// a capped one included, a dispatch hold in any case, a topology root, a step
-// of any formula, a reaction's own included, a type the allowlist leaves out,
-// no description, a work marker and a parent. Keys left blank, a step key left
-// empty and the retired placement marker decide nothing.
+// bead that is no input: a standing record, a feedback pattern, a review lane,
+// a route or an arm, a capped one included, a dispatch hold in any case, a
+// topology root, a step of any formula, a reaction's own included, a type the
+// allowlist leaves out, no description, a work marker and a parent. Keys left
+// blank, a step key left empty and the retired placement marker decide
+// nothing.
 func TestTheSweepKeepsOnlyRawInput(t *testing.T) {
 	meta := func(kv ...string) func(*fake.Bead) {
 		return func(b *fake.Bead) {
@@ -95,6 +96,9 @@ func TestTheSweepKeepsOnlyRawInput(t *testing.T) {
 		"tk-lane":          meta("check_name", "correctness"),
 		"tk-anchored":      meta("anchor_bead", "tk-anchor"),
 		"tk-member":        func(b *fake.Bead) { b.Edges = []gcbd.Edge{{Type: gcbd.EdgeParentChild, ID: "tk-epic"}} },
+	}
+	for _, k := range standingKinds {
+		drop["tk-standing-"+k] = meta("task_kind", k)
 	}
 	w := newWorld(t)
 	for id, edit := range keep {

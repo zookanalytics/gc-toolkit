@@ -52,8 +52,8 @@ var workMarkers = []stringKey{prrecord.Branch, prrecord.Result, workDirKey, prre
 // bead that is no input: one with a dispatch path or a dispatch hold, whose
 // next move is decided; one with no description; one whose type the allowlist
 // leaves out; a topology root, and a step, a reaction's own root and step among
-// them, which advance only through their own run; a feedback pattern; a review
-// lane; one that carries a headline, which every
+// them, which advance only through their own run; a standing record and a
+// feedback pattern; a review lane; one that carries a headline, which every
 // exit of a first reaction and a sitting's ruling write, so it has been
 // triaged; one whose work markers put it in motion; and a member of a parent,
 // whose parent-child edge is its own. The sling's refusals are read again at
@@ -70,7 +70,7 @@ func isCandidate(r *ledger.Record) (bool, error) {
 			return false, nil
 		}
 	}
-	if kind := raw(taskKindKey, r); kind == feedbackPattern || kind == reviewKind {
+	if kind := raw(taskKindKey, r); slices.Contains(standingKinds, kind) || kind == feedbackPattern || kind == reviewKind {
 		return false, nil
 	}
 	for _, k := range workMarkers {
@@ -219,7 +219,7 @@ func (r *Reactions) Sweep(dryRun bool, deadline time.Duration, emit func(Swept))
 		{refused[Reacting], "already reacting or in a conversation"},
 		{refused[Driven], "driven by a live workflow"},
 		{refused[Decided], "already routed, armed, held, assigned or waiting on a person"},
-		{refused[Excluded], "a feedback pattern"},
+		{refused[Excluded], "a standing record or a feedback pattern"},
 		{failed, "not slung for an error"},
 	} {
 		if s.n > 0 {

@@ -48,13 +48,22 @@ func TestABeadTheStoreDoesNotHoldIsAnErrorNotARefusal(t *testing.T) {
 	w.wantSling(1, "could not read tk-plain's own row (gc bd list exited 1", code, said, "(SUBJECT-READS)")
 }
 
-// A feedback pattern takes no first reaction in any state, so it is refused
-// with 6, naming its kind.
+// A standing record and a feedback pattern take no first reaction in any
+// state, so each is refused with 6, naming its kind.
 func TestAKindThatTakesNoReactionIsRefusedWithSix(t *testing.T) {
-	w := newWorld(t)
-	w.put(input("tk-kind", func(b *fake.Bead) { b.Metadata["task_kind"] = feedbackPattern }))
-	code, said := w.sling("tk-kind")
-	w.wantSling(Excluded, "it is a feedback pattern, which the feedback distiller dispatches", code, said, "(KIND-SKIP) "+feedbackPattern)
+	for _, kind := range append(slices.Clone(standingKinds), feedbackPattern) {
+		w := newWorld(t)
+		w.put(input("tk-kind", func(b *fake.Bead) { b.Metadata["task_kind"] = kind }))
+		code, said := w.sling("tk-kind")
+		why := "it is a standing record (task_kind=" + kind + ")"
+		if kind == feedbackPattern {
+			why = "it is a feedback pattern, which the feedback distiller dispatches"
+		}
+		w.wantSling(Excluded, why, code, said, "(KIND-SKIP) "+kind)
+	}
+	if len(standingKinds) == 0 {
+		t.Error("(KIND) the domain names no standing kind")
+	}
 }
 
 // A bead whose next move is decided already is refused with 5: a status other
@@ -78,13 +87,13 @@ func TestADecidedRowIsRefusedWithFive(t *testing.T) {
 		"held":       {func(b *fake.Bead) { b.Labels = []string{"learning", "hold:mayor"} }, "it is held (hold:mayor)"},
 		"held outside": {func(b *fake.Bead) { b.Labels = []string{"Hold:External"} },
 			"it is held (Hold:External): hold:mayor keeps it for the operator's placement sitting"},
-		"pattern and closed": {func(b *fake.Bead) { b.Status = "closed"; b.Metadata["task_kind"] = feedbackPattern }, "it is a feedback pattern"},
+		"standing and closed": {func(b *fake.Bead) { b.Status = "closed"; b.Metadata["task_kind"] = standingKinds[0] }, "it is a standing record"},
 	} {
 		w := newWorld(t)
 		w.put(input("tk-row", c.edit))
 		code, said := w.sling("tk-row")
 		want := Decided
-		if name == "pattern and closed" {
+		if name == "standing and closed" {
 			want = Excluded
 		}
 		w.wantSling(want, c.why, code, said, "(ROW) "+name)
