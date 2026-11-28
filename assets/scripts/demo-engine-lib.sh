@@ -235,7 +235,7 @@ _demo_engine_say() { echo "${PROG:-demo-engine-lib}: $1" >&2; }
 _demo_engine_node_ok() {
   local ver major rest minor
   if ! command -v node >/dev/null 2>&1; then
-    _demo_engine_say "node not found; the SprintShow engine needs Node >= 22.18. doctor/check-demo-toolchain names this gap."
+    _demo_engine_say "node not found; the SprintShow engine needs Node >= 22.18."
     return 1
   fi
   ver=$(node --version 2>/dev/null | sed 's/^v//')

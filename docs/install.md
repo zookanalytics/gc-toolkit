@@ -240,7 +240,6 @@ The pack's checks, and what a failure means:
 | `check-blocked-work-armed` | every blocked, unassigned plain-work bead carries a dispatch path — `gc.routed_to` or a `gc.dispatch_when_ready` arm (warn-only) | a blocked work bead with no route and no arm, so it strands when its blocker closes and no pool is offered it |
 | `check-armed-dispatch-owed` | every bead armed with `gc.dispatch_when_ready` that nothing holds, by an open blocker on it or, unless it is in flight, on an ancestor, was slung within the deferred-dispatch cadence (warn-only) | the deferred-dispatch order not firing, or an arm set at a non-open status that `bd ready` never surfaces |
 | `check-hq-marooned-work` | no rig-workable bead sits unclaimed in the HQ (city) store, which no pool reads | a city-scoped role with `GC_RIG` unset filing a bare `bd create` into the HQ store, marooning the work by construction |
-| `check-demo-toolchain` | the demo:capture toolchain — Node, ffmpeg, `OPENAI_API_KEY`, and `gh` — is resolvable, and `VERCEL_AUTOMATION_BYPASS_SECRET` reaches the session whenever the secrets file holds it (readiness, warn-only) | a missing demo dependency, so a capture degrades to a silent, captioned clip, or `VERCEL_AUTOMATION_BYPASS_SECRET` in the secrets file but not in the session, because `GC_SUPERVISOR_ENV` does not name it or the supervisor was installed before the file held it |
 
 `gc doctor --verbose` explains any failure; `gc doctor --fix` applies the
 canonical remediation where one exists.

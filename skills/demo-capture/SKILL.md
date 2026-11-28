@@ -270,12 +270,7 @@ the clip are working files, and neither is committed.
    ```
 
    Do there what the guide's `## Bring the app up` says the app needs before
-   its command runs. This reports whether the session can narrate a clip,
-   assemble it and attach it:
-
-   ```bash
-   gc doctor --check <binding>:check-demo-toolchain
-   ```
+   its command runs.
 
 2. **Draft from the bead.** Follow `gc-toolkit.gc-demo-script` on the PR's bead,
    with `--pr <number>`, reading the guide in the worktree. It writes the
@@ -365,8 +360,8 @@ browser step. A user-attachments URL is the only inline-playable path — a
 committed file, a release asset, or an external URL renders as a link — so the
 clip stays out of the repo tree and still plays on the PR. It pins the write to
 the rig's own origin and fails closed: a missing or too-old gh (the floor is
-2.99.0, which `doctor/check-demo-toolchain` probes), a foreign PR, or a gh error
-all exit non-zero rather than leaving the clip undelivered.
+2.99.0), a foreign PR, or a gh error all exit non-zero rather than leaving the
+clip undelivered.
 
 ## Demo-script format
 
@@ -410,11 +405,8 @@ needs `OPENAI_API_KEY`. Each is fetched on demand rather than assumed:
   `gc supervisor install` writes that env, as it does any key with an
   AI-provider prefix. Sessions started after that carry the key.
 
-The `doctor/check-demo-toolchain` check reports which of the others are
-resolvable, so a session knows before it captures whether the clip will be
-narrated or silent, and whether ffmpeg is in place. It also reports whether
+A capture that lacks a tool fails with a message that names the tool.
+
 `VERCEL_AUTOMATION_BYPASS_SECRET`, Vercel's Protection Bypass for Automation
-key, reaches the session. That key is neither a provider credential nor on
-gascity's short allowlist, so it reaches sessions from the secrets file only
-when `GC_SUPERVISOR_ENV` names it, and the check names that opt-in when the
-file holds the key and the session does not.
+key, is neither a provider credential nor on gascity's short allowlist, so it
+reaches sessions from the secrets file only when `GC_SUPERVISOR_ENV` names it.
