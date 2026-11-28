@@ -343,7 +343,10 @@ keys = [
 #   demo verdict's visual, the approvals a sign-off or a pass dismissed, and the
 #   review or ruling a rework child answered. A review run keeps its lanes'
 #   verdicts and visuals in its own output, and its result in review_results.
-#   Nothing writes or reads them.
+#   Nothing writes them. liveness-sweep.sh, whose deletion
+#   tools/deletion-plan.tsv schedules, still reads source_review_bead and
+#   source_ruling_bead in its landed-fix wedge check (wedged_fix_gates), and
+#   nothing reads the rest.
 
 [metadata.review_findings]
 # RETIRED, every key in this group. A finding was the old review path's review
@@ -351,8 +354,11 @@ keys = [
 # filed and the validation pass ruled; fix_notes sat on the rework child that
 # answered it, and source_finding on a deferred finding's follow-up. A review
 # run keeps each finding in its lanes' output and rules it in its own step.
-# Nothing writes or reads these keys. finding.key, which the patrol findings
-# share, is registered with them in [metadata.patrol_findings].
+# Nothing writes these keys. liveness-sweep.sh, whose deletion
+# tools/deletion-plan.tsv schedules, still reads finding.disposition and
+# finding.lane in its landed-fix wedge check (wedged_fix_gates), and nothing
+# reads the rest. finding.key, which the patrol findings share, is registered
+# with them in [metadata.patrol_findings].
 keys = [
   "finding.lane", "finding.disposition", "finding.source",
   "finding.severity", "finding.category", "finding.failure_scenario", "finding.verification",
