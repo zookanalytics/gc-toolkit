@@ -122,9 +122,8 @@ asks() { # <reader> <predicate>
         && ok "(READERS) $1 asks $2" \
         || bad "(READERS) $1 asks $2"
 }
-for r in doctor/check-blocked-work-armed/run.sh; do
-    sources "$r"; asks "$r" has_dispatch_path
-done
+sources doctor/check-blocked-work-armed/run.sh
+asks doctor/check-blocked-work-armed/run.sh has_dispatch_path
 for r in assets/scripts/liveness-sweep.sh assets/scripts/liveness-sweep-precheck.sh \
          assets/scripts/liveness-recheck.sh doctor/check-po-queue-only/run.sh; do
     sources "$r"
