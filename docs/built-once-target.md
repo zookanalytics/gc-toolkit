@@ -117,10 +117,10 @@ a draft, and the operator reads each lane's verdict at a head in the run's one
 comment for that head on the PR, beside how each finding was ruled.
 
 The trade: review beads, lane derivation, validation passes, machine finding
-beads and the sweeps that close their leftovers go. A rig runs them until its
-cutover, and the old path's retirement (tk-1tfzr71.122) deletes them once every
-rig has cut over and the GitHub intake (tk-1tfzr71.21) has landed. A person's
-finding on a PR stays a record the operator rules on.
+beads and the sweeps that close their leftovers go. Since its cutover a rig
+files none of those beads, the merge cadence's sweeps close what is left of
+them, and the old path's retirement (tk-1tfzr71.122) deletes it all. A person's
+post on a PR is an ask the PR's review run rules and answers where it was made.
 
 ### Merge
 
@@ -200,6 +200,23 @@ and what ends it:
   refinery validated once the evaluator finds the PR ready, where Gas Town
   leaves the merge to a person. The operator approves and the city lands the
   PR, on every target. No end is planned.
+- **The landing order takes a PR's posts, red checks and conflicts.** It
+  decides each from the read the PR watch saves on the PR's bead, where the old
+  intake, `pr-facts.sh`, polled every open PR and copied GitHub's state into
+  keys of its own. It files each person's post as an ask on the bead and marks
+  it with the city's 👀, files an ask for a required check that failed and for
+  a conflict on an approved PR, and asks a person where the city cannot go on. The PR's review run
+  works every ask. Gas City's PR monitor would file a repair bead that a second
+  worker takes onto the PR's branch, and copy GitHub's facts onto it. It would
+  also file one for a check that is not required, since its query reads no
+  check's required flag, read a cancelled check as still pending, and file one
+  for a PR that only waits on a review
+  ([the design, section 4](../specs/tk-1tfzr71.161/design.md#4-red-checks-and-conflicts)).
+  The first two rest on the city's rules of one writer per branch and one copy
+  of GitHub's state, so no upstream change ends them. The third ends once the
+  monitor reads each check's required flag, spells a cancelled check's
+  conclusion as GitHub does, and files nothing for a PR that only waits on a
+  review.
 - **Only the city's own PRs.** The `mr` step takes a PR only when the city's
   account opened it, and parks the bead behind a gate when another account
   opened the PR on its branch. Gas Town takes the PR open on the branch and
@@ -356,10 +373,12 @@ because the session that next claims it resumes in the worktree the bead
 records. The witness
 triages HELP and NOTICE mail, and the mail wakes it. An order runs `gc doctor`
 each hour and records the run, and the board shows the checks that keep
-failing, when doctor last ran, each monitor order's last good run and the
-`human` mailbox that Gas City's orders send their alerts to. Patrol owns the
-warranted Dolt reclaim and suspended-store backup, and the reapers no native one
-covers: scratch and the review workspaces outside `.gc/worktrees/`.
+failing, when doctor last ran, each monitor order's last good run and how
+many messages wait in the `human` mailbox that Gas City's orders send their
+alerts to, which the mayor works through with the operator. Patrol owns
+the warranted Dolt reclaim and suspended-store backup, and the reapers no
+native one covers: scratch and the review workspaces outside
+`.gc/worktrees/`.
 
 The trade: the deacon, boot health, the incident ledger, the liveness census and
 the witness's patrol loop retire (tk-1tfzr71.19).
@@ -377,9 +396,9 @@ and what ends it:
 - **Findings and human gates in place of mayor mail.** Gas Town's witness mails
   the mayor about emergencies, failures, recovered and handed-off orphans and
   queue health. Here the orders and the witness file findings and human gates,
-  because the operator ruled at tk-rl8gz4b.29's design that it stays and the
-  city runs no mayor. This ends when an operator ruling gives escalation to a
-  seat.
+  because the operator ruled at tk-rl8gz4b.29's design that it stays, and the
+  city's mayor, a seat the operator opens, takes no escalation. This ends when
+  an operator ruling gives escalation to a seat.
 - **No orphan recovery.** Gas Town's witness salvages a dead owner's worktree
   and reopens its bead. Here Gas City's controller and core's orphan sweep
   release the claim within minutes, which a second writer would race, and the
@@ -462,7 +481,6 @@ bd 1.3.2.
 |---|---|---|
 | the hand-stamped routes in code other members retire, and the rescues that repair them | `gc sling --no-formula`, assignment | the member that retires each, tk-1tfzr71.19 to .22 |
 | `orphan-dispose.sh`'s generic arms | core's orphan-sweep | tk-1tfzr71.19 |
-| `pr-facts.sh` polling and its mirrored keys | the PR monitor and webhook receiver | tk-1tfzr71.21 |
 
 ### Copied boilerplate
 
@@ -524,14 +542,13 @@ more than its size. A branch already in flight shows its measured net instead.
 Each member is armed behind the one before it, and at most two migrations are
 in flight at once, on disjoint subsystems. The retirement last in lane A is the
 exception: the old review path's (tk-1tfzr71.122) is armed behind every rig's
-cutover and tk-1tfzr71.21. A member whose method is a design convoy lands only after
-the operator approves its design.
+cutover. A member whose method is a design convoy lands only after the operator
+approves its design.
 
 | Lane | Member | What it removes | Size |
 |---|---|---|---|
-| A | tk-1tfzr71.21 | `pr-facts.sh` polling and mirroring, the merge cadence's driver and its pacing, the failure cap and the supersession check | 18,145 |
 | A | tk-1tfzr71.23 | the membership readers on parent-child | partial files |
-| A | tk-1tfzr71.122 | the old review path, once every rig's cutover has moved its PRs onto the pending record and the GitHub intake has landed: review beads, lane derivation, validation passes, machine findings and their sweeps, `signoff.sh`, `mol-review`, `mol-review-quorum-signoff`, the bring-current guard and audit, and the cutover script | 18,326, and the cutover script |
+| A | tk-1tfzr71.122 | the old review path, once every rig's cutover has moved its PRs onto the pending record: review beads, lane derivation, validation passes, machine findings and their sweeps, `signoff.sh`, `mol-review`, `mol-review-quorum-signoff`, the bring-current guard and audit, the review dismissal, the refinery's merge cadence with its order and its pacing, and the cutover script | 20,698, and the cutover script |
 | B | tk-1tfzr71.174 | the patrols' second landing, once the first (tk-1tfzr71.19) has added the doctor order and the orders that look: the deacon and its doctor runner, boot health, the incident ledger, the liveness census, the witness's patrol loop and its nudge order, the salvage's branch context | 16,081, and `seat-progress.sh` with its test |
 | B | tk-1tfzr71.24 | the board's second data plane and pack-stamped rows, verbs that only call Gas City | partial files |
 | B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, the `board` stub verb | 588 |

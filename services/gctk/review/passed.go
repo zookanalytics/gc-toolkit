@@ -19,8 +19,8 @@ import (
 // spends no attempt, and its own edge holds the PR until a later run takes it.
 // Each finding or ask the run ruled must-fix at an earlier head must name the
 // commit that fixes it or a fix in the PR's title or summary. A finding fixed
-// there, which no commit carries and no diff shows, needs its check to have
-// run in a later iteration, so its lane judged the summary the round's push
+// there, which no commit carries and no diff shows, needs its check to have run
+// in a later iteration, so its lane judged the summary the round's push
 // published. A finding declined by its lane's own rule counts as ruled, and so
 // does a question put to a person, so the loop stops there rather than spend
 // its attempts on a question only a person can settle.
@@ -110,7 +110,7 @@ func judge(run *Run, n int, asks []Ask) []string {
 				why = append(why, fmt.Sprintf("a %s finding names no id, so no ruling can answer it", ln.Check))
 				continue
 			}
-			if _, ok := rulingOf(rp, func(r Ruling) bool { return r.rulesFinding(ln.Check, f.ID) }); !ok {
+			if _, ok := rulingOf(rp.Rulings, func(r Ruling) bool { return r.rulesFinding(ln.Check, f.ID) }); !ok {
 				why = append(why, fmt.Sprintf("%s finding %s is not ruled", ln.Check, f.ID))
 			}
 		}
@@ -122,7 +122,7 @@ func judge(run *Run, n int, asks []Ask) []string {
 		if !a.Takeable() {
 			continue
 		}
-		if _, ok := rulingOf(rp, func(r Ruling) bool { return r.Ask == a.ID }); !ok {
+		if _, ok := rulingOf(rp.Rulings, func(r Ruling) bool { return r.Ask == a.ID }); !ok {
 			why = append(why, fmt.Sprintf("ask %s is open and nothing holds it, and the round did not take it", a.ID))
 		}
 		for _, c := range a.Checks {
@@ -208,12 +208,9 @@ func lane(it *Iteration, check string) (Lane, bool) {
 	return Lane{}, false
 }
 
-// rulingOf is the round's first ruling that match accepts.
-func rulingOf(rp *Repair, match func(Ruling) bool) (Ruling, bool) {
-	if rp == nil {
-		return Ruling{}, false
-	}
-	for _, r := range rp.Rulings {
+// rulingOf is the first of a round's rulings that match accepts.
+func rulingOf(round []Ruling, match func(Ruling) bool) (Ruling, bool) {
+	for _, r := range round {
 		if match(r) {
 			return r, true
 		}
@@ -254,23 +251,7 @@ func (v *Verdict) Explain() string {
 		if rp := it.Repair; rp != nil {
 			fmt.Fprintf(&b, "  rule-and-repair at %s: %d ruling(s), pushed %s\n", rp.Head, len(rp.Rulings), orNone([]string{rp.Pushed}))
 			for _, r := range rp.Rulings {
-				fmt.Fprintf(&b, "    %s: %s", r.Subject(), r.Ruling)
-				if r.Commit != "" {
-					fmt.Fprintf(&b, " by %s", r.Commit)
-				}
-				switch {
-				case r.Summary && r.Commit != "":
-					fmt.Fprint(&b, " and in the PR's summary")
-				case r.Summary:
-					fmt.Fprint(&b, " in the PR's summary")
-				}
-				if r.Gate != "" {
-					fmt.Fprintf(&b, " through %s", r.Gate)
-				}
-				if r.Reason != "" {
-					fmt.Fprintf(&b, ": %s", oneLine(r.Reason))
-				}
-				fmt.Fprintln(&b)
+				explainRuling(&b, r)
 			}
 		} else {
 			fmt.Fprintln(&b, "  rule-and-repair: nothing written")
@@ -291,6 +272,34 @@ func (v *Verdict) Explain() string {
 		}
 	}
 	return b.String()
+}
+
+// explainRuling writes one ruling's line of the account: what it rules, the
+// ruling, its commit, its gate, the question it settles and its reason.
+func explainRuling(b *strings.Builder, r Ruling) {
+	fmt.Fprintf(b, "    %s: %s", r.Subject(), r.Ruling)
+	if r.Commit != "" {
+		fmt.Fprintf(b, " by %s", r.Commit)
+	}
+	switch {
+	case r.Summary && r.Commit != "":
+		fmt.Fprint(b, " and in the PR's summary")
+	case r.Summary:
+		fmt.Fprint(b, " in the PR's summary")
+	}
+	if r.Gate != "" {
+		fmt.Fprintf(b, " through %s", r.Gate)
+	}
+	switch {
+	case r.Settles != "" && r.Moot:
+		fmt.Fprintf(b, ", making the question at %s moot", r.Settles)
+	case r.Settles != "":
+		fmt.Fprintf(b, ", settling the question at %s", r.Settles)
+	}
+	if r.Reason != "" {
+		fmt.Fprintf(b, ": %s", oneLine(r.Reason))
+	}
+	fmt.Fprintln(b)
 }
 
 func orNone(list []string) string {
