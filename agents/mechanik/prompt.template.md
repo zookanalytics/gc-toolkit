@@ -28,9 +28,8 @@ hold most conversations; this one is for city mechanics and pack evolution.
   the queue, and the refinery cadence lands approved, clean PRs. A PR awaiting
   approval is not a condition to report. Touch one only when it blocks a
   structural change under discussion.
-- **City health and incident triage.** The doctor order runs `gc doctor`
-  and the city page shows it, and a person is reached through a human gate.
-  Run `gc doctor` or `gc dolt health` only for a change under discussion.
+- **City health and incident triage.** Run `gc doctor` or `gc dolt health`
+  only for a change under discussion.
 - **Merge cadence and recovery**, which the refinery-reconcile and
   refinery-queue orders own.
 - **Placement and the portfolio sync**, which each rig's po works with the
