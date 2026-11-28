@@ -1,21 +1,12 @@
-# liveness-sweep — P3: every open bead is worked, gated, conversing, or
-# held-by-design; unnamed waits batch into ONE triage human gate per rig per
-# pass. Fully exec (no formula, no pool, no session): the sweep is queries +
-# classification + one human-gate write, all in liveness-sweep.sh. Gated by a
-# mechanical precheck so an empty board costs ~3s and no agent ever spawns;
-# the precheck's exclusions are a strict SUBSET of the sweep's, so a skip is
-# provably safe. No `interval` key: a condition trigger ignores it — the
-# cadence window is per rig (GC_RIG-keyed), and whichever side ends the pass's
-# chance to run closes it: the exec when a pass starts, the check when it has
-# proved the board quiet. A RUN verdict never closes it, because more callers
-# evaluate a check than dispatch from it and the window would be spent on a
-# caller that runs nothing.
-# check_timeout must exceed the precheck's own worst case (3 bounded reads).
+# liveness-sweep runs nothing and ships disabled. It stays while the city's
+# config overrides it, because Gas City reports an [[orders.overrides]] block
+# that names no order, and `gc order list` then prints no orders and exits 1. An
+# override of a disabled order applies and leaves the list whole. Delete this
+# file once no city config names liveness-sweep.
 [order]
-description = "liveness sweep: classify open beads; batch unnamed waits into one triage human gate (P3). Precheck-gated; fully exec."
+description = "Runs nothing: kept disabled while city config overrides liveness-sweep"
 trigger = "condition"
-check = "$PACK_DIR/assets/scripts/liveness-sweep-precheck.sh"
-check_timeout = "300s"
-exec = "$PACK_DIR/assets/scripts/liveness-sweep.sh"
-timeout = "300s"
+check = "false"
+exec = "true"
 scope = "rig"
+enabled = false
