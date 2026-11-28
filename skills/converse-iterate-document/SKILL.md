@@ -36,12 +36,8 @@ think their direction is wrong, and propose what would serve it better, so the
 document beats what either of you would write alone and still carries their
 direction.
 
-- **Start from a read of the document.** Send it to a read-only subagent where
-  one is offered, so the conclusions reach the thread and the file does not. Ask
-  for findings with line references at the commit it read. When the subject's
-  notes hold an earlier scaffold, ask first whether its rework carried it, item
-  by item, and then what fresh eyes find. No review check compares a rework with
-  its scaffold, so this read is the one that does.
+- **Start from a brief of the document,** made as `converse-prep` says, with
+  the operator's ask as its charge.
 - **Put up one item a turn, with your recommendation.** The operator rules on
   it, and you move on. Items of one kind can go up together as a table to
   redline, one row each with your proposed verdict.
@@ -178,4 +174,4 @@ description the same way the ruling line does. Send either one as the
 
 A further round is another block and one more rework, and the newest block is
 the one in force. When the operator engages the document again, start again from
-the read above.
+a fresh brief.

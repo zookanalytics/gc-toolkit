@@ -48,24 +48,26 @@ comment adds the conclusion and the actions recorded on the conversation.
 
 ## Prime
 
-Rebuild the state from the record, never from memory: the conversation with
-its notes, the subject's own human gates, then the subject:
+Rebuild the state from the record, never from memory. The premise re-check
+printed the conversation with its notes, and each gate in the entry's `GATES`
+with its framing. When this session did not run the re-check, as when
+`converse-continue` re-opens a sitting, read them first, with
+`gc bd show "$CONVERSATION"` and `gc bd show <gate>` for each gate.
+
+Then read the subject's own human gates, and the subject's description with
+the newest `## Current state` block in its notes, which is the distilled truth:
 
 ```bash
-gc bd show "$CONVERSATION"
 gc bd dep list "$SUBJECT" --type blocks --json | jq -r '.[] | select(.issue_type == "gate" and .await_type == "human") | "\(.id) [\(.status)] \(.title)"'
-gc bd show "$SUBJECT"
+gc bd show "$SUBJECT" --json | jq -r '.[0] | (.description // ""), ("\n" + (.notes // "") | split("\n## ") | map(select(startswith("Current state"))) | last | if . then "## " + . else "No ## Current state block in the notes." end)'
 ```
 
-On the subject, the newest `## Current state` block in the notes is the
-distilled truth. Read each gate in the entry's `GATES` too, with
-`gc bd show <gate>`, which gives the gate's framing. The subject's other
-conversations are its history:
-`gc bd dep list "$SUBJECT" --direction=up --type tracks`.
-`"$CONV/bead-context.sh" "$SUBJECT" --frontier --horizon` adds, in one call
-that reads the subject's own store, the subject's core state, its readiness
-with its open blockers named, and for an epic a snapshot of its children. Then do the
-preparation the conversation's ask calls for.
+The rest of its notes is its history, read only where the operator's decision
+turns on it, and so are the subject's other conversations:
+`gc bd dep list "$SUBJECT" --direction=up --type tracks`. Read its core state
+with `"$CONV/bead-context.sh" "$SUBJECT" --frontier --horizon`, one call that
+reads the subject's own store: its assignee and route, its readiness with its
+open blockers named, and for an epic a snapshot of its children.
 
 **A gate's message was written when the gate was filed.** Before you prepare,
 run the re-check the gate's filer left in its description or notes, if it left
@@ -91,5 +93,13 @@ hand, so an unread conversation never passes for an empty one:
 ```bash
 "$CONV/converse-pr-conversation.sh" "$SUBJECT"
 ```
+
+Then prepare what the operator's first decision turns on, and nothing more. A
+document the ask is about reaches you as a brief rather than as the file. Send
+it to a read-only subagent where one is offered, with the operator's ask as its
+charge, and have it return each item the ask is about, with its line reference
+at the commit it read. When the newest `## Current state` block is a scaffold,
+have it say first whether the document carries each line of the block, because
+no review check compares a rework with its scaffold.
 
 Once primed, hold for the operator (`converse-hold`).
