@@ -101,6 +101,7 @@ type Write struct {
 	labelsOn    []string
 	labelsOff   []string
 	status      string
+	deferUntil  string
 	assignee    *string
 	note        string
 	prio        *int
@@ -142,6 +143,12 @@ func (w *Write) Title(title string) { w.title = title }
 // checked close, which bd refuses while a live blocker or an open child holds
 // the bead.
 func (w *Write) Status(status string) { w.status = status }
+
+// Defer moves the bead to bd's deferred status until the date given, such as
+// +1h, in the same write, the date riding with the status. bd leaves a
+// deferred bead out of its ready set and returns it to open on the first ready
+// read after that date.
+func (w *Write) Defer(until string) { w.status, w.deferUntil = "deferred", until }
 
 // Assignee assigns the bead to assignee in the same write, "" for nobody. Gas
 // City reads an assignee as the delivery of the bead to that session as its
@@ -246,6 +253,9 @@ func (w *Write) args() []string {
 	}
 	if w.status != "" {
 		args = append(args, "--status="+w.status)
+		if w.deferUntil != "" {
+			args = append(args, "--defer="+w.deferUntil)
+		}
 	}
 	if w.assignee != nil {
 		args = append(args, "--assignee="+*w.assignee)

@@ -380,9 +380,12 @@ pool it was slung to does not choose.
 A patrol agent is not a distinct Gas City variant. It is a named singleton
 ([gascity/agent-types.md](gascity/agent-types.md#variant-a--named-singletons-named_session))
 whose prompt adds a patrol-wisp cycle on top of the standard lifecycle. The
-deacon, witness and refinery are this pack's patrol agents, as they are in
-upstream's gastown pack: each `[[named_session]]` declares them like any other
-singleton, and their prompts implement the patrol contract below.
+deacon and the witness are this pack's patrol agents, as they are in upstream's
+gastown pack: each `[[named_session]]` declares them like any other singleton,
+and their prompts implement the patrol contract below. Upstream's refinery is a
+patrol agent too, and this pack's is not: a refinery session takes one item
+assigned to it and ends, and holds no wisp
+([built-once-target.md](built-once-target.md#merge)).
 
 It is called out on its own because the contract has substantial mechanics
 that pool workers and ad-hoc sessions do not have, and because regressions in
@@ -427,9 +430,9 @@ title-keyed adopt-before-pour) — the native agent prompts under
 startup-discovery fragment. If an agent's startup-discovery block is
 missing tier 2 or 3, expect missed-MERGE_READY-style stalls.
 
-Only refinery and deacon are held to the full walk. The other two
-consumers share the fragment for its ephemeral-awareness rules
-rather than for tier coverage:
+Only the deacon is held to the full walk. The witness and boot
+share the fragment for its ephemeral-awareness rules rather than
+for tier coverage:
 
 - **witness** — reconcile-only by design. It monitors other agents'
   work rather than receiving branch-bearing work beads of its own,
@@ -462,9 +465,9 @@ Beyond what the underlying named singleton provides:
   handoff — the next cycle is the handoff. Closing the current
   wisp and the cycle-recycle behavior in the prompt template
   together carry the cadence.
-- **Health.** Patrol freshness is checked by deacon's own patrol
-  (`mol-deacon-patrol.toml`): a stale patrol wisp on witness or
-  refinery surfaces as a deacon warning. The reconciler also
+- **Health.** Boot checks the deacon's patrol freshness: it reads
+  the deacon's newest patrol wisp (`assets/scripts/boot-health.sh`),
+  and files a finding while it is stale. The reconciler also
   surfaces patrol agents that are alive-but-stuck via
   `gc doctor` checks.
 
@@ -479,10 +482,10 @@ deacon). See [gascity/agent-types.md, Variant A](gascity/agent-types.md#variant-
 
 Patrol wisps are *produced* by the patrol cycle itself and recovered through
 the assignee tiers, not consumed from a routed pool. Outside work reaches a
-patrol agent in the form it finds its work by
+named agent in the form it finds its work by
 ([deferred-dispatch.md](deferred-dispatch.md#a-named-agent-hears-through-gas-citys-hand-off)):
-the refinery's patrol takes a bead assigned to it, and the deacon and the
-witness, whose hooks answer their own patrol wisps, take mail.
+the deacon and the witness, whose hooks answer their own patrol wisps, take
+mail, and the refinery's search takes a bead assigned to it.
 
 ### Examples in the wild
 
@@ -493,8 +496,11 @@ witness, whose hooks answer their own patrol wisps, take mail.
   `mode = "always"`): per-rig orphan worktree salvage, stuck polecat
   detection, missing-bead-owner surfacing.
 - **Refinery** (`<rig>/gc-toolkit.refinery`, rig-scoped,
-  `mode = "on_demand"`): merge queue processor; patrol cycle pours
-  per merge-queue iteration.
+  `mode = "on_demand"`), the named singleton beside them: merge queue
+  processor. Gas City starts a session when an item assigned to it
+  waits, and the session claims that item through its search
+  (`gctk refinery next`), works it through `mol-refinery-patrol.toml`'s
+  steps and ends.
 
 ## A scan resolves an owner before it calls one absent
 

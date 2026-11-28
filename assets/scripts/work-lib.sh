@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # work-lib.sh — what mol-polecat-work's step scripts share, with the test of a
-# branch's writer that the refinery's find-work reads too. Sourced, never
-# executed.
+# branch's writer, which the refinery's search applies in Go too. Sourced,
+# never executed.
 #
 # A step script reads its work bead once, through work_read, and passes the
 # fields along. Gas City leaves the bead a run works open and unassigned, and a
@@ -156,9 +156,10 @@ work_bd() { gc bd "$@"; }
 # in_progress claim. A bead open under a live name is handed off, not written,
 # and a list that cannot be read proves nobody gone. work-setup.sh waits behind
 # a sibling whose tree holds the branch while this finds the sibling writing.
-# The refinery's find-work counts a bead that waits on the one it would take as
-# a writer of that one's branch only while this finds it writing, since it
-# cannot start before that one closes.
+# The refinery's search (gctk refinery next, refinery.Search.writing in Go)
+# counts a bead that waits on the one it would take as a writer of that one's
+# branch only while the same test finds it writing, since it cannot start
+# before that one closes.
 work_writing() { # <bead> <status> <assignee>
   local runs
   runs=$(run_lib runs work_bd "$1") || return 2

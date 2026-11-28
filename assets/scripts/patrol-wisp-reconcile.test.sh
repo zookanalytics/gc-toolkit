@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Hermetic test for the patrol-wisp LEAK GUARDS of every patrolling agent:
-# witness, deacon and refinery.
+# witness and deacon.
 #
 # THE LEAK: a mol-<agent>-patrol wisp that no query can see survives every
 # reconcile pass and accumulates one row per interrupted pour. Three
@@ -12,7 +12,7 @@
 #   2. AN --assignee-SCOPED RECONCILE CANNOT SEE THAT WISP. It matches no
 #      query on this restart or any later one, so it is unreachable garbage.
 #      Reconcile stays assignee-BLIND and matches by TITLE. The per-rig
-#      witness and refinery then narrow to THIS rig: several rigs run this
+#      witness then narrows to THIS rig: several rigs run this
 #      pack and pour the same patrol title into one shared store, so title
 #      alone collides across rigs. A wisp is this rig's when its assignee
 #      segment or pour-stamped gc.rig names this rig, or when it names no rig
@@ -38,10 +38,6 @@
 #     title-scoped, rig-scoped, assignee-blind, ephemeral-aware collection.
 #   - POUR (formulas/mol-<agent>-patrol.toml, `patrol-wisp-pour`) — a failed
 #     assign rolls the pour back and refuses to burn the current wisp.
-#
-# The refinery's pour is no block of text but a script, `refinery-patrol.sh
-# next`, whose own suite (refinery-patrol.test.sh) runs its guard, so this
-# suite checks the refinery's reconcile alone.
 #
 # No live city, Dolt, network, or wisps — only jq and a tmpdir.
 set -euo pipefail
@@ -300,12 +296,10 @@ fx() {
 # burns its own current wisp on the happy path. The per-rig witness stamps
 # gc.rig before the assign (two updates) and then defers its next wisp (a
 # third); a failed assign exits before that defer. The city-singleton deacon
-# takes no rig scope, so it only assigns (one update). The refinery has no pour
-# block, so its pour fields are `-`.
+# takes no rig scope, so it only assigns (one update).
 AGENTS=(
   "witness  rig  0|w-cur|w-new,w-new,w-new 1|w-new|w-new,w-new yes"
   "deacon   city 0|w-cur|w-new       1|w-new|w-new       yes"
-  "refinery rig  -                   -                   -"
 )
 # The files the loop reads through paths it builds from each agent's name.
 # run-tests --affected selects a suite only by a path it names, so they are
@@ -313,13 +307,12 @@ AGENTS=(
 READS=(
   agents/witness/prompt.template.md formulas/mol-witness-patrol.toml
   agents/deacon/prompt.template.md formulas/mol-deacon-patrol.toml
-  agents/refinery/prompt.template.md
 )
 
 for SPEC in "${AGENTS[@]}"; do
   read -r AGENT SCOPE POUR_OK POUR_FAIL BURNS_CURRENT <<<"$SPEC"
   TITLE="mol-$AGENT-patrol"
-  # A per-rig agent (witness, refinery) runs with GC_RIG set and a rig-prefixed
+  # A per-rig agent (the witness) runs with GC_RIG set and a rig-prefixed
   # assignee. The deacon is a city singleton: GC_RIG arrives unset and its
   # assignee carries no rig segment — the exact shape its reconcile must handle
   # and the shape a rig-scoped sweep silently drops.
@@ -351,11 +344,9 @@ for SPEC in "${AGENTS[@]}"; do
   [ -n "$RECONCILE" ] \
     && ok "$AGENT: reconcile extracted between patrol-wisp-reconcile markers" \
     || bad "$AGENT: reconcile extraction EMPTY — markers missing from $PROMPT"
-  if [ "$POUR_OK" != - ]; then
-    [ -n "$POUR" ] \
-      && ok "$AGENT: pour guard extracted between patrol-wisp-pour markers" \
-      || bad "$AGENT: pour extraction EMPTY — markers missing from $TOML"
-  fi
+  [ -n "$POUR" ] \
+    && ok "$AGENT: pour guard extracted between patrol-wisp-pour markers" \
+    || bad "$AGENT: pour extraction EMPTY — markers missing from $TOML"
 
   printf '%s\n' "$RECONCILE" > "$TMP/reconcile.sh"
   printf '%s\n' "$POUR"      > "$TMP/pour.sh"
@@ -364,11 +355,9 @@ for SPEC in "${AGENTS[@]}"; do
   bash -n "$TMP/reconcile.sh" \
     && ok "$AGENT: extracted reconcile is syntactically valid bash" \
     || bad "$AGENT: extracted reconcile failed bash -n"
-  if [ "$POUR_OK" != - ]; then
-    bash -n "$TMP/pour.sh" \
-      && ok "$AGENT: extracted pour guard is syntactically valid bash" \
-      || bad "$AGENT: extracted pour guard failed bash -n"
-  fi
+  bash -n "$TMP/pour.sh" \
+    && ok "$AGENT: extracted pour guard is syntactically valid bash" \
+    || bad "$AGENT: extracted pour guard failed bash -n"
 
   # --- Reconcile. ------------------------------------------------------------
   eq "$(run_reconcile "$(fx "$FX_LEAK")")" "w-run|w-orph" \
@@ -433,8 +422,8 @@ for SPEC in "${AGENTS[@]}"; do
     fi
   fi
 
-  # Cross-rig scoping is only the per-rig agents' concern. The witness and
-  # refinery coexist across rigs in one store, so each must leave a foreign
+  # Cross-rig scoping is only the per-rig agents' concern. The witnesses of the
+  # rigs coexist in one store, so each must leave a foreign
   # rig's wisp alone. The city-singleton deacon has no sibling and no rig, so
   # it has no cross-rig case; its regression is the FX_LEAK check above run
   # with GC_RIG unset and a rig-less assignee — the shape a rig sweep drops —
@@ -477,48 +466,46 @@ for SPEC in "${AGENTS[@]}"; do
        "$AGENT: the startup pour names the city store"
   fi
 
-  if [ "$POUR_OK" != - ]; then
-    # --- Pour guard. -----------------------------------------------------------
-    eq "$(run_pour 0 0 0 w-cur)" "$POUR_OK" \
-       "$AGENT: happy path: pours and assigns the new wisp"
+  # --- Pour guard. -----------------------------------------------------------
+  eq "$(run_pour 0 0 0 w-cur)" "$POUR_OK" \
+     "$AGENT: happy path: pours and assigns the new wisp"
 
-    # THE CORE GUARD: a failed assign must roll the pour back and report failure,
-    # so the current wisp is never burned. Leaking w-new here IS the bug.
-    eq "$(run_pour 1 0 0 w-cur)" "$POUR_FAIL" \
-       "$AGENT: REGRESSION: a failed assign rolls the poured wisp back, exits non-zero, and burns no current wisp"
+  # THE CORE GUARD: a failed assign must roll the pour back and report failure,
+  # so the current wisp is never burned. Leaking w-new here IS the bug.
+  eq "$(run_pour 1 0 0 w-cur)" "$POUR_FAIL" \
+     "$AGENT: REGRESSION: a failed assign rolls the poured wisp back, exits non-zero, and burns no current wisp"
 
-    # A pour that yields no id must not be assigned, must not be burned, and must
-    # still stop the current wisp from being burned.
-    eq "$(run_pour 0 1 0 w-cur)" "1||" \
-       "$AGENT: an empty pour exits non-zero without assigning or burning"
+  # A pour that yields no id must not be assigned, must not be burned, and must
+  # still stop the current wisp from being burned.
+  eq "$(run_pour 0 1 0 w-cur)" "1||" \
+     "$AGENT: an empty pour exits non-zero without assigning or burning"
 
-    # Rollback is best-effort: if the burn also fails, the guard still exits
-    # non-zero. The stray is then the title-scoped reconcile's problem — which is
-    # exactly why that half of the fix has to be assignee-blind.
-    eq "$(run_pour 1 0 1 w-cur)" "$POUR_FAIL" \
-       "$AGENT: a failed rollback burn still exits non-zero (reconcile is the backstop)"
+  # Rollback is best-effort: if the burn also fails, the guard still exits
+  # non-zero. The stray is then the title-scoped reconcile's problem — which is
+  # exactly why that half of the fix has to be assignee-blind.
+  eq "$(run_pour 1 0 1 w-cur)" "$POUR_FAIL" \
+     "$AGENT: a failed rollback burn still exits non-zero (reconcile is the backstop)"
 
-    # --- Resolving the CURRENT wisp, for the snippet that burns it itself. ------
-    if [ "$BURNS_CURRENT" = "yes" ]; then
-      # GC_BEAD_ID is empty on every fresh session, so the fallback query is the
-      # live path, not a spare. It must find OUR patrol wisp: not the unowned
-      # same-title orphan (reconcile's job, not this step's), and not our
-      # in-progress non-patrol molecule.
-      eq "$(run_pour 0 0 0 "" "$(fx "$FX_CURRENT")")" "$POUR_OK" \
-         "$AGENT: REGRESSION: with GC_BEAD_ID unset the fallback resolves our own patrol wisp and burns it"
+  # --- Resolving the CURRENT wisp, for the snippet that burns it itself. ------
+  if [ "$BURNS_CURRENT" = "yes" ]; then
+    # GC_BEAD_ID is empty on every fresh session, so the fallback query is the
+    # live path, not a spare. It must find OUR patrol wisp: not the unowned
+    # same-title orphan (reconcile's job, not this step's), and not our
+    # in-progress non-patrol molecule.
+    eq "$(run_pour 0 0 0 "" "$(fx "$FX_CURRENT")")" "$POUR_OK" \
+       "$AGENT: REGRESSION: with GC_BEAD_ID unset the fallback resolves our own patrol wisp and burns it"
 
-      # CONTROL, so the assertion above cannot pass for the wrong reason: put the
-      # pre-fix query shape back and watch the same fixture leak. `--type=wisp` is
-      # refused by bd, so the current wisp never resolves — the next wisp is
-      # poured and assigned, and the old one is left behind. That is the leak.
-      sed 's/--type=molecule --include-infra --limit=0/--type=wisp --limit=1/' \
-        "$TMP/pour.sh" > "$TMP/pour-mutated.sh"
-      if cmp -s "$TMP/pour.sh" "$TMP/pour-mutated.sh"; then
-        bad "$AGENT: control did not mutate the fallback query — its shape changed, re-check the sed"
-      else
-        eq "$(run_pour 0 0 0 "" "$(fx "$FX_CURRENT")" "$TMP/pour-mutated.sh")" "1||${POUR_OK##*|}" \
-           "$AGENT: CONTROL: the pre-fix --type=wisp fallback leaves the current wisp unburned"
-      fi
+    # CONTROL, so the assertion above cannot pass for the wrong reason: put the
+    # pre-fix query shape back and watch the same fixture leak. `--type=wisp` is
+    # refused by bd, so the current wisp never resolves — the next wisp is
+    # poured and assigned, and the old one is left behind. That is the leak.
+    sed 's/--type=molecule --include-infra --limit=0/--type=wisp --limit=1/' \
+      "$TMP/pour.sh" > "$TMP/pour-mutated.sh"
+    if cmp -s "$TMP/pour.sh" "$TMP/pour-mutated.sh"; then
+      bad "$AGENT: control did not mutate the fallback query — its shape changed, re-check the sed"
+    else
+      eq "$(run_pour 0 0 0 "" "$(fx "$FX_CURRENT")" "$TMP/pour-mutated.sh")" "1||${POUR_OK##*|}" \
+         "$AGENT: CONTROL: the pre-fix --type=wisp fallback leaves the current wisp unburned"
     fi
   fi
 

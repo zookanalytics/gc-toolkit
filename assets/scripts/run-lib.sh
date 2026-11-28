@@ -51,8 +51,7 @@
 # work-setup.sh and work-submit.sh refuse under --held-by a change a run works.
 # Its test of a branch's writer takes the runs that work a bead on the branch:
 # work-setup.sh reads it for a bead whose tree holds the branch, to tell a
-# sibling from a tree left behind, and refinery-find-work.sh for a bead that
-# waits on the one it would take, to tell a writer from a bead that only waits.
+# sibling from a tree left behind.
 # gate-ensure.sh takes the runs poured over a review, live or not, to judge whether a pour still drives it.
 # queue-priority.sh takes the live runs that work a bead it settles, to write
 # their convoys, roots and steps, and priority-lib.sh follows a root to the

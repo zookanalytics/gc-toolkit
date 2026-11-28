@@ -131,8 +131,11 @@ no warrant.
     so `gc worktree ensure` cannot make a tree inside an agent's home. The search
     is [specs/tk-1tfzr71.43/gas-city-search.md](../specs/tk-1tfzr71.43/gas-city-search.md).
   - `internal/formula/parser.go`, `mergeSteps`: a child step replaces its parent's
-    whole, so an inherited step cannot gain metadata, and a step that needs
-    `gc.continuation_group` must be overridden. The base declares none.
+    whole. The only metadata an inherited step gains without an override is
+    what a formula-level `[[scope]]` declaration stamps, its scope keys and
+    `gc.on_fail` (`applyScopeDecls` in `internal/formula/scope_decl.go`, and
+    section 3.5 of `docs/reference/specs/formula-spec-v2.md`), so a step that
+    needs `gc.continuation_group` must be overridden. The base declares none.
   - `internal/sling/sling_core.go`, `checkLegacySourceWorkflowConflict`, and
     `internal/sling/sling_attachment.go`, `liveConvoyTrackedWorkflowRoots`: a second
     live root of one formula on one bead is refused, unless `--force` skips the
@@ -142,7 +145,7 @@ no warrant.
   `.gc/worktrees/<rig>/artifacts/worktrees/<bead>` and records it as
   `artifact_dir`, rebases a rejected branch, and at the handoff detaches the tree
   and deletes its branch.
-- **Verified.** 2026-11-26, at `gastownhall/gascity` main d38ec7842f8d and
+- **Verified.** 2026-11-27, at `gastownhall/gascity` main 6dce31bbb68e and
   `gastownhall/gascity-packs` main 44b9db7168f6.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished,
   parked and held work and ends a run by cancelling it. `workspace-setup`: no end
@@ -749,14 +752,16 @@ no warrant.
     nothing reports a run that has finished, so the start titles each pour with
     its token and searches it after an earlier attempt.
   - Upstream tracks the gap as open P1 bugs: #7163, a formula slung onto a
-    blocked bead runs before its blockers close, and #8832, native execution
-    admission loses current input readiness, whose fix is the open PR #8834.
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main 35e0a4c6fc, with
-  #7163, #8832 and PR #8834 open and unmerged.
+    blocked bead runs before its blockers close, whose fix is the open PR
+    #9406, and #8832, native execution admission loses current input
+    readiness, whose fix is the open PR #8834.
+- **Verified.** 2026-11-25, at `gastownhall/gascity` main 887a253144d4, with
+  #7163, #8832, PR #8834 and PR #9406 open and unmerged.
 - **Retires when.** Gas City holds a poured workflow's steps until its input
-  bead is ready (gastownhall/gascity#8832, which PR #8834 fixes, and #7163). The
-  arm then becomes a plain `gc sling <pool> <bead> --on <formula>` at arm time,
-  and the order, the dispatch lock, the title token, the cap and
+  bead is ready (gastownhall/gascity#8832, which PR #8834 fixes, and #7163,
+  which PR #9406 fixes). The arm then becomes a plain
+  `gc sling <pool> <bead> --on <formula>` at arm time, and the order, the
+  dispatch lock, the title token, the cap and
   `doctor/check-armed-dispatch-owed` retire.
 
 ## Feedback patterns
@@ -798,8 +803,8 @@ no warrant.
     --until`), a `blocks` edge onto its follow-up, `bd close`, and `bd reopen`.
     The search is
     [specs/tk-ltcv43q/gas-city-search.md](../specs/tk-ltcv43q/gas-city-search.md).
-- **Verified.** 2026-11-26, at `gastownhall/gascity` main d38ec7842f8d, `gastownhall/beads`
-  main 786241099046 and `gastownhall/gascity-packs` main 44b9db7168f6.
+- **Verified.** 2026-11-27, at `gastownhall/gascity` main 6dce31bbb68e, `gastownhall/beads`
+  main 0c9c8e697843 and `gastownhall/gascity-packs` main 44b9db7168f6.
 - **Retires when.** Gas City ships a loop that decides agents' recurring
   feedback as work, with the evidence each decision rests on.
 

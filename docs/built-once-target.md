@@ -143,11 +143,24 @@ pack's, because no rule of GitHub's covers an integration branch, and the
 operator ruled at tk-1tfzr71.20's design that the city requires an approval on
 every target.
 
-The refinery's target is Gas Town's refinery, and its patrol takes Gas Town's
-steps one for one. The pack keeps a refinery of its own because the city imports
-no gastown pack, and no gastown release carries the pending-through-merge record
-yet. Each remaining difference names its reason and what ends it:
+The refinery's target is Gas Town's refinery, and its steps take Gas Town's one
+for one up to the landing. The pack keeps a refinery of its own because the
+city imports no gastown pack, and no gastown release carries the
+pending-through-merge record yet. Each remaining difference names its reason
+and what ends it:
 
+- **One item per session, with no standing wisp.** A refinery session claims
+  one item assigned to it through its own search (`gctk refinery next`, the
+  agent's work query), works it and ends with `gc runtime drain-ack`, and Gas
+  City starts a session only when an item waits or a wake names one. Gas Town's
+  refinery keeps a patrol wisp assigned to itself and pours the next one at the
+  end of each pass (gastownhall/gascity-packs 44b9db7168,
+  `gastown/agents/refinery` and its prompt). Gas City counts an open molecule
+  root assigned to a session as wake demand, so that wisp starts a new session
+  as soon as an idle stop, a kill or a city restart ends one, and the new
+  session does nothing when no work waits
+  ([the search](../specs/tk-1tfzr71.242/gas-city-search.md#the-standing-wisp)).
+  No end is planned.
 - **Merge, never rebase.** The refinery brings a branch current by merging its
   target in, and every push is a fast-forward. A push onto a work's branch goes
   under git's lease on the commit the writer read there, once the writer has
@@ -251,10 +264,11 @@ yet. Each remaining difference names its reason and what ends it:
   on the saved read and the store, and reads GitHub first only for a merge,
   through the one-PR update's re-read of the PR in full, since a merge made in
   error puts work on the target, which no run takes back. No end is planned.
-- **find-work reads waits.** It skips a bead something holds or whose branch
-  another open bead works on, and takes a rework child before its anchor. Gas
-  Town takes any bead assigned to the refinery. Two writers on one branch would
-  overwrite each other's work. This ends when Gas Town's find-work reads waits.
+- **find-work reads waits.** Its search leaves a bead something holds, makes a
+  bead whose branch another open bead works on wait on that bead, and takes a
+  rework child before its anchor. Gas Town takes any bead assigned to the
+  refinery. Two writers on one branch would overwrite each other's work. This
+  ends when Gas Town's find-work reads waits.
 - **A branch already on its target.** A direct landing an earlier pass pushed
   but did not record is recorded `merged`, at the commit the bead's
   `direct_landing_sha` names, and any other branch with no change is refused as

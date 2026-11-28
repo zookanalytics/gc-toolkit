@@ -20,9 +20,8 @@
 #     recorded pending at that head, with no rework child. An ask that does
 #     not land records nothing. A record that does not land after the ask
 #     leaves the bead as it was, held by the ask and so never pending without
-#     it, and asks a person to write the record; the next patrol's find-work
-#     takes the bead, and its requeue of the same head finds the open ask and
-#     files no second, whatever its reason;
+#     it, and asks a person to write the record; a requeue of the same head
+#     then finds the open ask and files no second, whatever its reason;
 #   - an open rework child already on the branch takes the reason in its notes,
 #     and nothing else is filed or slung;
 #   - a rework child handed back goes back itself, and its anchor is untouched;
@@ -44,14 +43,7 @@ fresh() {
   rm -rf "${TMP:?}"/*
   rt_init refinery-requeue.sh
 }
-# The fixture for the patrol after a requeue, whose find-work takes the bead
-# again.
-fresh_patrol() {
-  rm -rf "${TMP:?}"/*
-  rt_init refinery-requeue.sh refinery-find-work.sh
-}
 run() { OUT=$("$SUT/refinery-requeue.sh" "$@" 2>&1); RC=$?; }
-find_work() { NAMED=$("$SUT/refinery-find-work.sh" 2>/dev/null); FW_RC=$?; }
 kid() { jq -r '[ .[] | select(.metadata.task_kind == "rework") ][0].id // ""' "$STORE"; }
 
 echo "# a bead with no record goes back itself, unassigned, in one guarded write"
@@ -139,7 +131,7 @@ hasnt "$(logged scripts)" "human-gate" "no person is asked"
 eq "$(bstatus p) $(bassignee p) $(meta p merge_result)" "open rig-a/gc-toolkit.refinery pull_request_head_changed" "the bead stays with the refinery as it was"
 
 echo "# a record that does not land after the ask leaves the ask holding the bead, and asks a person to write it"
-fresh_patrol
+fresh
 branch_with polecat/p p.txt >/dev/null
 work p polecat/p '{"merge_result":"pull_request_head_changed","existing_pr":"https://github.com/zook/rig/pull/7"}'
 prepared p polecat/p
@@ -152,8 +144,6 @@ has "$(cat "$STUB_HOLDS")" "p $ASK" "…and holds the bead, so no merge waits on
 eq "$(bstatus p) $(bassignee p) $(meta p merge_result) $(meta p pr_head_sha)" "open rig-a/gc-toolkit.refinery pull_request_head_changed <absent>" "the bead is not recorded pending, so the landing order merges nothing at that head"
 has "$(logged scripts)" "human-gate --subject p --key refinery-requeue-failed" "a gate on the bead asks a person"
 has "$(logged scripts)" "pr record p --pr https://github.com/zook/rig/pull/7 --head $READ --target main --refinery rig-a/gc-toolkit.refinery" "…naming the record to write by hand"
-find_work
-eq "$FW_RC $NAMED" "0 p" "the next patrol takes the bead the ask holds"
 run --bead p --reason "TestX fails at the second check"
 eq "$RC" 0 "the requeue of the same head exits 0"
 eq "$(jq '[ .[] | select((.title // "") | startswith("Review ask: ")) ] | length' "$STORE")" "1" "it files no second ask, though its reason differs"

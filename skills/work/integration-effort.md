@@ -73,13 +73,13 @@ SUMMARY=$(gc bd --rig <rig> create "summary: the PR for <what the effort deliver
   --parent <epic> --deps "<each bead of the effort, comma-separated>,blocks:$LANDING" --json | jq -r '.id // empty')
 [ -n "$SUMMARY" ] || { echo "no summary task filed; stopping" >&2; exit 1; }
 
-# 6. Assign the landing bead to the refinery. Its patrol finds its work by the
+# 6. Assign the landing bead to the refinery. Its search finds its work by the
 # beads assigned to it, and the landing bead waits on the effort's beads, so
-# the assignee alone hands it over: Gas City nudges the refinery when the last
-# of them closes. The refinery takes it once nothing it waits on is open, so
-# assign it only after every wait above is written: then it cannot reach the
-# default branch before every bead of the effort and the summary task has
-# closed.
+# the assignee alone hands it over: Gas City starts a refinery session for it
+# when the last of them closes. The refinery takes it once nothing it waits on
+# is open, so assign it only after every wait above is written: then it cannot
+# reach the default branch before every bead of the effort and the summary task
+# has closed.
 gc bd --rig <rig> update "$LANDING" --assignee <rig>/<binding>.refinery \
   || { echo "$LANDING is not handed to the refinery; dispatching nothing" >&2; exit 1; }
 
@@ -145,16 +145,17 @@ default branch's commits as its change.
 1. File the hand-off by the block below. It names the effort's landing bead
    and waits on the outside work by a `blocks` edge. The block assigns it to
    the refinery, as the work skill sends the refinery a bead. It carries no
-   `branch`, because the refinery's patrol takes a bead that carries one as a
-   branch to land.
+   `branch`, because the refinery takes a bead that carries one as a branch to
+   land.
 2. Make the bead that needs the branch current wait on the hand-off by a
    `blocks` edge, and arm it to dispatch when the hand-off closes (the waits
    skill).
-3. Once the outside work has landed, Gas City nudges the refinery with the
-   hand-off's id, and the refinery brings the branch current. It fast-forwards the branch to the
-   default branch when the branch holds nothing the default branch lacks, and
-   otherwise merges the default branch into it. It pushes the result and
-   closes the hand-off, which releases the bead.
+3. Once the outside work has landed, the hand-off is ready, and Gas City
+   starts a refinery session, which claims it and brings the branch current.
+   It fast-forwards the branch to the default branch when the branch holds
+   nothing the default branch lacks, and otherwise merges the default branch
+   into it. It pushes the result and closes the hand-off, which releases the
+   bead.
 4. A merge that conflicts goes to a polecat, never to the operator. The
    refinery pushes nothing and files the merge as a bead of the effort, a task
    on its branch that the hand-off and the landing bead wait on. The summary

@@ -170,9 +170,10 @@ record for it. The work skill gives each agent's command.
   ([gascity/routing-model.md](gascity/routing-model.md#the-read-side-the-claim-predicate)).
   `--no-convoy` keeps the raw route from filing an auto-convoy around the bead.
 - **An agent that finds its work by listing the beads assigned to it takes the
-  assignee.** The refinery's patrol lists the open beads assigned to it that
-  carry a `branch`, and the keeper's wake sweep lists the beads assigned to it
-  that carry a handback. A route never reaches either list.
+  assignee.** The refinery's hook claims through its search,
+  `gctk refinery next`, which lists the beads assigned to it, and the keeper's
+  wake sweep lists the beads assigned to it that carry a handback. A route
+  never reaches either list.
 - **The deacon and the witness patrol their own wisps.** Each one's hook
   answers its patrol's wisp ahead of a bead routed or assigned to it, and
   neither patrol lists assigned beads, so they take mail, which each patrol
