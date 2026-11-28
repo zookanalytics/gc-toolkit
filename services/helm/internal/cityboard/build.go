@@ -1,10 +1,10 @@
 // Package cityboard is the board's city page: what doctor's newest run found,
 // read from the newest gc-toolkit.doctor.ran event in the city's event log,
 // whose payload is gctk's doctor.Record (specs/tk-1tfzr71.158/design.md,
-// section 5). It decides which checks the page shows and counts, and whether
-// the run is late. A monitor order's lateness is Gas City's verdict, in its
-// order checks, which reach the page as checks, so the page holds no rule for
-// it.
+// section 5), and how many messages wait in the operator's mailbox (mail.go).
+// It decides which checks the page shows and counts, and whether the run is
+// late. A monitor order's lateness is Gas City's verdict, in its order checks,
+// which reach the page as checks, so the page holds no rule for it.
 package cityboard
 
 import (

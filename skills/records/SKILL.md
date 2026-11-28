@@ -1,6 +1,6 @@
 ---
 name: records
-description: Use when you record an outcome or a finding in a bead's notes, sum up long notes, set a bead's one-line headline (its takeaway), or file an observation of feedback about standing agent behavior. To ask a person to decide, use waits; for a durable document such as a spec, use filing-documentation.
+description: Use when you record an outcome or a finding in a bead's notes, sum up long notes, set a bead's one-line headline (its takeaway), or file an observation of feedback about standing agent behavior or of a change to it you would suggest. To ask a person to decide, use waits; for a durable document such as a spec, use filing-documentation.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -8,7 +8,8 @@ compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 
 Use this skill to record an outcome in a bead's notes, to sum up long notes in
 a current-state block, to set a bead's one-line headline, or to file an
-observation of feedback about standing agent behavior.
+observation of feedback about standing agent behavior or of a change to it you
+would suggest.
 
 ## Record an outcome on a bead
 
@@ -75,6 +76,9 @@ one observation before the turn ends, by
 it says which turns carry feedback, gives the one `gc bd create` call that
 files the observation with every field, and says how to set its provenance,
 category and directive.
+
+A change to how agents work that you would suggest but should not make on your
+own is an observation too, filed the same way and kept out of your memory.
 
 Feedback about one change's content, such as a bug or a wrong approach, is
 review, not an observation.

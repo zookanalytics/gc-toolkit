@@ -20,13 +20,19 @@ import (
 // evaluator finds no passed result there or the bead carries an ask a run can
 // take, and only while nothing else writes the branch and no person is asked:
 // no run is attached, no open bead other than an ask names the branch, and no
-// human gate holds it. A conversation on the PR holds its merge and nothing
-// else, so runs are poured while one is open, whether it waits in the
-// operator's queue, a sitting holds it or its sitting stays: the evaluator
-// reads the conversation's blocks edge as a wait of the bead's own, so the PR
-// merges only once the conversation closes. The pour runs under the record
-// lock the run holds for the record, so two runs that overlap pour one review
-// run.
+// human gate holds it. A question a review run put to a person holds no run
+// back from a person's post the take filed after it: while every gate that
+// holds the bead is such a question and an ask a run can take carries a
+// person's post, filed after the newest of them, the order pours the run that
+// rules the post, which can settle a question (specs/tk-1tfzr71.161/design.md,
+// section 3). The ask's filing is what counts, not when the post was made,
+// since the run that put the question never read a post taken after it. A
+// conversation on the PR holds its merge and nothing else, so runs are poured
+// while one is open, whether it waits in the operator's queue, a sitting holds
+// it or its sitting stays: the evaluator reads the conversation's blocks edge
+// as a wait of the bead's own, so the PR merges only once the conversation
+// closes. The pour runs under the record lock the run holds for the record, so
+// two runs that overlap pour one review run.
 //
 // The runs attached to a bead are its blocks edges onto roots of the review
 // formula, open or closed, and each root carries the vars it was poured with,
@@ -91,7 +97,7 @@ func (u *run) admit(s state, ans Answer, asks []review.Ask) (plan, bool) {
 	if len(s.runs) > 0 {
 		return checked("review run " + strings.Join(s.runs, ", ") + " is attached, and the bead waits on it: " + why)
 	}
-	if by := heldBy(s); by != "" {
+	if by := heldBy(s, asks); by != "" {
 		return checked("no review run is poured while " + by + ": " + why)
 	}
 	writers, err := u.writers(s)
@@ -154,16 +160,53 @@ func (u *run) rank(ctx context.Context, root string) string {
 
 // heldBy names the open human gate on the bead s read, which keeps the order
 // from pouring a run on it, because a gate asks a person and the next run
-// starts from the answer. It is empty when no gate is open on the bead. An
-// open conversation on the PR is no such hold, since it holds the PR's merge
+// starts from the answer. It is empty when no gate is open on the bead, and
+// when the ask of a person's post was filed after the questions that hold it
+// (askedSince).
+// An open conversation on the PR is no such hold, since it holds the PR's merge
 // and nothing else.
-func heldBy(s state) string {
+func heldBy(s state, asks []review.Ask) string {
+	var open []*ledger.Record
 	for _, b := range s.blockers {
 		if b.Status() != "closed" && person.IsHumanGate(b.IssueType(), b.AwaitType()) {
-			return fmt.Sprintf("human gate %s (%s) holds the bead", b.ID, firstOf(b.AwaitID(), "no key"))
+			open = append(open, b)
 		}
 	}
-	return ""
+	if len(open) == 0 || askedSince(s, open, asks) {
+		return ""
+	}
+	return fmt.Sprintf("human gate %s (%s) holds the bead", open[0].ID, firstOf(open[0].AwaitID(), "no key"))
+}
+
+// askedSince reports whether every gate in open is a question a review run put
+// to a person, keyed as review-run.sh question keys one (review.QuestionKey),
+// and an ask a run can take carries a person's post and was filed after the
+// newest of them, by the ask's own filing, whenever the post was made. That
+// ask's run rules the post, and the post can settle a question or make it
+// moot. A time that does not read holds the run back.
+func askedSince(s state, open []*ledger.Record, asks []review.Ask) bool {
+	var newest time.Time
+	for _, g := range open {
+		if !strings.HasPrefix(g.AwaitID(), review.QuestionKey) {
+			return false
+		}
+		at, err := time.Parse(time.RFC3339Nano, g.CreatedAt())
+		if err != nil {
+			return false
+		}
+		if at.After(newest) {
+			newest = at
+		}
+	}
+	for _, a := range asks {
+		if !a.Takeable() || PostNamed(a.Reason, s.rec.URL) == "" {
+			continue
+		}
+		if at, err := time.Parse(time.RFC3339Nano, a.Filed); err == nil && at.After(newest) {
+			return true
+		}
+	}
+	return false
 }
 
 // writers names the open beads other than the bead s read and its asks that

@@ -1085,10 +1085,30 @@ func TestADefaultListingLeavesOutClosedAndPinnedBeads(t *testing.T) {
 		{[]string{"--parent", "p"}, "o,own,h"},
 		{[]string{"--parent", "p", "--all"}, "o,c,pin,own,h"},
 		{[]string{"--parent", "p", "--status", "open,pinned"}, "o,pin"},
+		{[]string{"--parent", "p", "--status", "all"}, "o,c,pin,own,h"},
 		{nil, "p,o,own,h"},
 	} {
 		if got := ids(t, f.gc(append(append([]string{"bd", "list"}, c.args...), "--json")...)); got != c.want {
 			t.Errorf("list %v = %s, want %s", c.args, got, c.want)
+		}
+	}
+}
+
+func TestChildrenIsTheListingOfEveryChild(t *testing.T) {
+	f := newFixture(t, `[{"id":"p","status":"open"},{"id":"o","status":"open","parent":"p"},{"id":"c","status":"closed","parent":"p"},`+
+		`{"id":"pin","status":"pinned","parent":"p"},{"id":"n","status":"open"}]`, "")
+	if got := ids(t, f.gc("bd", "children", "p", "--json")); got != "o,c,pin" {
+		t.Errorf("children p = %s, want o,c,pin", got)
+	}
+	if r := f.gc("bd", "children", "n", "--json"); r.status != 0 || r.out != "[]\n" {
+		t.Errorf("a bead with no children: %+v", r)
+	}
+	if r := f.run([]string{"STUB_LIST_PARTIAL=--parent p --status all"}, "bd", "children", "p", "--json"); r.status != 1 || r.out != "[]\n" {
+		t.Errorf("a list fault reads the listing's arguments: %+v", r)
+	}
+	for _, args := range [][]string{{"--json"}, {"p", "n", "--json"}} {
+		if r := f.gc(append([]string{"bd", "children"}, args...)...); r.status != 1 || !strings.Contains(r.err, "accepts 1 arg(s)") {
+			t.Errorf("children %v takes exactly one id, as bd does: %+v", args, r)
 		}
 	}
 }
